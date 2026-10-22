@@ -9,7 +9,11 @@ description: >-
 
 # Controle de documentacao
 
-**Biblioteca:** `C:\Users\Jonathan Nascimento\Documents\Biblioteca`  
+**Biblioteca:** raiz do repo onde esta skill mora (a pasta real dela e'
+`<Biblioteca>\.claude\skills\controle-documentacao`). Instalada global
+(junction em `~/.claude/skills`, feito pelo `install-global.ps1`): resolver
+com `(Get-Item "$HOME\.claude\skills\controle-documentacao").Target` e
+subir 3 niveis.  
 **Regras detalhadas:** `01-regras-biblioteca.md`  
 **Templates:** `_templates/{tipo}.md`
 
@@ -73,14 +77,15 @@ se o resumo não tiver a resposta.
 | `progresso` | `progresso/` — **fora** do fluxo normal (sem `number:`, nao entra em `sync-all.ps1`/`INDEX.md`/`CATALOGO.md`/dashboard) | Doc de trabalho, sobrescrito (nao log): reflete o AGORA da implementacao. Ver secao "Progresso — execucao continua" abaixo |
 | `rules` | raiz | So `01-regras-biblioteca.md` |
 | `reqs` | `reqs/` (plano) | Card/REQ original verbatim, incluindo o parent (Feature/Epic) quando houver — referencia crua, fora do indice numerado e do `sync-all.ps1` |
+| `delegada` | `delegadas/` | Task passada pra **outro dev do time** (o usuario nao implementa) — analise, dev, PRs e rodadas de review. **Um doc por task** (nao por repo: `repo:` lista todos os repos separados por espaco). Tem `number:` e passa pelo `sync-all.ps1`, mas **nunca** vira card do dashboard principal — aparece so' em `time.html` (pagina Time). Sem `resumo`/`task-code`/`task-planning` proprios. Campos extras: `dev` (id de `delegadas/devs.json`), `dificuldade`, `estimativa`, `delegada_em`. Corpo e fluxo: skill `delegar-task` (a tabela `## Analise` tem rotulos fixos lidos pelo gerador). `delegadas/devs.json` so' via botao "+ Dev" (`scripts/time-dev.ps1`), nunca a mao |
 
 **Camada (`repo:`):** nao existe mais subpasta frontend/backend — `repo:`
 no frontmatter ja basta pra qualquer script/dashboard diferenciar a
 camada (convencao de nome: sufixo `-backend`, prefixo `mfe-`/`mobile-` =
-frontend). Ex.: `repo: gbm-mfe-settings` e `repo: gbm-app-settings-backend`
+frontend). Ex.: `repo: meu-app-frontend` e `repo: meu-app-backend`
 moram os dois em `testes/`, so o `repo:` muda.
 
-Exemplo: `testes/101034-aurora-sheet-testes.md`
+Exemplo: `testes/101034-side-sheet-testes.md`
 
 **Nome:** sem numero sequencial (o `number:` do frontmatter ja cobre
 isso). `task-code`/`task-planning`/`resumo` nao repetem o tipo no nome;
@@ -146,6 +151,14 @@ O `task-code/` (doc de ciclo de vida, quando criado) referencia esse arquivo por
 
 ### Gatilhos automaticos (agente deve atualizar YAML)
 
+Esta tabela e' o **contrato da Biblioteca com o fluxo de desenvolvimento**.
+A Biblioteca nao depende de nenhuma skill de fluxo especifica (triagem,
+plano, TDD, review, git): qualquer fluxo — o do seu `CLAUDE.md`, um
+publico como o superpowers, ou nenhum — so' precisa reconhecer o evento
+da coluna da esquerda e aplicar a acao da direita (ou chamar esta skill
+pra aplicar). Os nomes de skill citados abaixo sao exemplos, nao
+requisitos.
+
 | Evento | Acao |
 |--------|------|
 | Usuario aprova task-code | `status: in_progress` no `task-code` e no planning |
@@ -154,9 +167,10 @@ O `task-code/` (doc de ciclo de vida, quando criado) referencia esse arquivo por
 | Testes unitarios rodados | Atualizar doc `testes/` (mesmo arquivo) |
 | Testes manuais OK | Preencher resultados no mesmo `testes/` |
 | Usuario pede mensagem de commit ou fecha entrega | `status: completed` no `testes/`, no `task-planning` **e no `task-code`** — o `task-code` nao fica preso em `draft`/`Rascunho` so porque nenhum gatilho anterior o tocou |
-| **Agente monta commit + texto/link de PR pro usuario** (padrao GBM, `gbm-git-workflow`) — o pedido em si ja e' o gatilho, nao esperar o usuario confirmar que abriu de verdade. Link nesse momento normalmente e' o `.../pull/new/<branch>` do push (agente **nunca** roda `gh pr create` por conta propria, so' se o usuario disser algo inequivoco tipo "abre o PR voce mesmo" — ver `gbm-git-workflow`) | Registrar o link **na hora**, no `resumo` dessa task+repo: `pr_pending` no frontmatter + a URL completa em algum lugar do corpo (Status atual ou nota curta) — precisa ser a URL inteira, nao só `PR #NNN` em texto solto, senao o card nunca mostra o pill (`Get-Signals` so' acha PR via regex na URL completa). Quando o usuario informar depois o link real do PR ja criado, atualizar `pr_pending` pra essa URL (e' ela que alimenta o sweep automatico de merge, ver `dashboard-visual/scripts/build-dashboard.ps1`, logica do sweep). Se a task tiver mais de um PR (repo espelho, fix de review em branch separada, etc.), cada PR novo e' *outro* evento deste gatilho — nao só o primeiro. Motivo: PR #295 (fix de review da task 104691) ficou sem nenhum registro por dias, so' apareceu quando foi cobrado manualmente — o gatilho de "Task resolvida? = sim" abaixo so' cobre o *ultimo* PR que fecha a task, nao os PRs intermediarios. |
-| Usuario responde "Task resolvida?" = sim (pos-PR, `gbm-git-workflow`) | Confirmar que o(s) link(s) de PR ja registrados (gatilho acima) estao como `pr_merged` (nao mais `pr_pending`); rodar o last check do Gate — REQ e parent; `status: completed` no task-code/planning/testes; `sync-all.ps1`. Se task-code nao existe ainda (fluxo ad-hoc sem spec previo): criar agora, salvando o REQ/pedido original em `reqs/` retroativamente |
-| Usuario responde "Task resolvida?" = nao | Perguntar o que falta; manter `status: in_progress`; registrar a lacuna no doc — nao fechar |
+| **Agente monta commit + texto/link de PR pro usuario** (pela skill de git/PR do seu fluxo, se houver) — o pedido em si ja e' o gatilho, nao esperar o usuario confirmar que abriu de verdade. Link nesse momento normalmente e' o `.../pull/new/<branch>` do push (agente **nunca** roda `gh pr create` por conta propria, so' se o usuario disser algo inequivoco tipo "abre o PR voce mesmo") | Registrar o link **na hora**, no `resumo` dessa task+repo: `pr_pending` no frontmatter + a URL completa em algum lugar do corpo (Status atual ou nota curta) — precisa ser a URL inteira, nao só `PR #NNN` em texto solto, senao o card nunca mostra o pill (`Get-Signals` so' acha PR via regex na URL completa). Quando o usuario informar depois o link real do PR ja criado, atualizar `pr_pending` pra essa URL (e' ela que alimenta o sweep automatico de merge, ver `dashboard-visual/scripts/build-dashboard.ps1`, logica do sweep). Se a task tiver mais de um PR (repo espelho, fix de review em branch separada, etc.), cada PR novo e' *outro* evento deste gatilho — nao só o primeiro. Motivo: PR #295 (fix de review da task 104691) ficou sem nenhum registro por dias, so' apareceu quando foi cobrado manualmente — o gatilho de "Task resolvida? = sim" abaixo so' cobre o *ultimo* PR que fecha a task, nao os PRs intermediarios. |
+| Usuario confirma que a task esta resolvida (pos-PR — ex.: responde "sim" a "Task resolvida?") | Confirmar que o(s) link(s) de PR ja registrados (gatilho acima) estao como `pr_merged` (nao mais `pr_pending`); rodar o last check do Gate — REQ e parent; `status: completed` no task-code/planning/testes; `sync-all.ps1`. Se task-code nao existe ainda (fluxo ad-hoc sem spec previo): criar agora, salvando o REQ/pedido original em `reqs/` retroativamente |
+| Usuario diz que a task **nao** esta resolvida | Perguntar o que falta; manter `status: in_progress`; registrar a lacuna no doc — nao fechar |
+| PR de dev do time abre/mergeia numa task `delegada` | Nada manual: URL vai pra `## PRs` + `pr_pending` (skill `delegar-task` no modo revisar, ou botao "Buscar PRs" / `scripts/delegadas-prs.ps1`); o sweep do `build-dashboard.ps1` marca `status: completed` quando todos mergeiam. Delegada **nao** dispara o toque no `resumo` (linha "Qualquer atualizacao" abaixo) |
 | Implementacao diverge do que o `task-planning` descreve (mudou de abordagem no meio do caminho) | Atualizar `progresso/{taskId}-{slug}.md` na hora (ver secao "Progresso — execucao continua" abaixo) — nao esperar um marco grande pra registrar |
 | **Qualquer** atualizacao de `task-code`/`task-planning`/`testes`/`handover-tecnico` de uma task (nao so no inicio ou no fim) | Dar um toque no `resumo` dessa task+repo: criar se ainda nao existir, senao atualizar pelo menos **Status atual** e **O que falta**. **"Status atual" e' um snapshot, nao um log — reescrever pro estado atual (branch, PR numero+estado, o que esta pendente, poucas linhas/bullets), nunca acrescentar mais um paragrafo de narrativa da rodada.** Historico rodada-a-rodada (o que foi reportado, causa raiz, fix, verificacao) fica em `testes/` (secao `## Ajustes QA — rodada N`) ou `handover-tecnico/` quando o assunto merece narrativa funda — nao duplicar em `resumo/`. Motivo: task 104691 acumulou 2 rodadas de QA direto em "Status atual" sem nunca reescrever, virou 80+ linhas de historico misturada com estado atual, exatamente o tipo de bloco que a pagina de resumo (agora "o principal" que mostra o quadro completo da task) mais expõe. Nao esperar o fim da task pra manter o resumo fresco — ele e' consultado a qualquer momento (dashboard visual em `dashboard-visual/`), nao so na conclusao. **"Ainda nao existir" e' verificavel, nao suposicao** — antes de criar um `resumo` novo, rodar `grep -rl "^task: {taskId}" resumo/` (task numerica) ou `grep -rln "^cluster: {cluster}" resumo/*/*.md` (task `general`) no repo da Biblioteca; só criar se vier vazio. Pular esse grep foi a causa raiz de 8 resumos duplicados ficarem escondidos do dashboard (colisao de `cluster`+`repo`, regularizada em 2026-08-14) — `build-dashboard.ps1` so mostra 1 resumo por task+repo, sem avisar quando ha mais de um. |
 
@@ -167,20 +181,20 @@ O `task-code/` (doc de ciclo de vida, quando criado) referencia esse arquivo por
 number: 28
 type: task-planning
 status: in_progress
-repo: gbm-mfe-settings
+repo: meu-app-frontend
 task: 101034
 function: Resumo de uma linha para o INDEX
-titulo_busca: Reativacao toggle inline classification-metrics  # OBRIGATORIO (nao "opcional — preencher se sobrar tempo"). Titulo curto do que foi FEITO (nao do card/task) — vira o TITULO do card no dashboard, o `taskLabel` antigo (ex. "Task 108364 — Backend") desce pra subtitulo. Escrever com as palavras-chave da tarefa (nomes de tela/endpoint/funcionalidade), pra bater o olho e já saber do que se trata sem ler mais nada — não repetir "Task NNN"/nome de repo (isso já está no subtítulo), não copiar o `function:` inteiro. 3-8 palavras, sem artigo/preambulo ("Reativacao toggle inline X", nao "Isso implementa a reativacao..."). Doc sem esse campo preenchido = titulo do card cai pro `taskLabel` antigo (funciona, mas nao é mais o padrão esperado).
+titulo_busca: Reativacao toggle inline metricas  # OBRIGATORIO (nao "opcional — preencher se sobrar tempo"). Titulo curto do que foi FEITO (nao do card/task) — vira o TITULO do card no dashboard, o `taskLabel` antigo (ex. "Task 108364 — Backend") desce pra subtitulo. Escrever com as palavras-chave da tarefa (nomes de tela/endpoint/funcionalidade), pra bater o olho e já saber do que se trata sem ler mais nada — não repetir "Task NNN"/nome de repo (isso já está no subtítulo), não copiar o `function:` inteiro. 3-8 palavras, sem artigo/preambulo ("Reativacao toggle inline X", nao "Isso implementa a reativacao..."). Doc sem esse campo preenchido = titulo do card cai pro `taskLabel` antigo (funciona, mas nao é mais o padrão esperado).
 stub: —
 cluster: —             # opcional, so pra `task: general` — nome curto (2-4 palavras) que o dashboard usa como titulo do card no lugar de "Geral" E como chave de agrupamento (substitui o fallback por `related`/path — ver dashboard-visual/CLAUDE.md). Manter o MESMO texto em todo doc do mesmo assunto — e' isso que agrupa os docs no mesmo card.
-pseudo_task: —         # opcional, so pra `task: general` — numero curto e sequencial na faixa 900+ (contador proprio, separado do `number:` global; ver INDEX.md campo "Proximo pseudo_task") pra dar uma forma facil de achar por busca no dashboard alem do nome do cluster - a faixa 900+ nunca colide visualmente com task id real (todo id GBM comeca com 1) e filtra so digitando "9" na busca. So atribuir quando quem cria o doc realmente quer esse atalho numerico (nem todo `task: general` precisa).
+pseudo_task: —         # opcional, so pra `task: general` — numero curto e sequencial na faixa 900+ (contador proprio, separado do `number:` global; ver INDEX.md campo "Proximo pseudo_task") pra dar uma forma facil de achar por busca no dashboard alem do nome do cluster - a faixa 900+ nunca colide visualmente com task id real (ids de work item costumam ter 5-6 digitos) e filtra so digitando "9" na busca. So atribuir quando quem cria o doc realmente quer esse atalho numerico (nem todo `task: general` precisa).
 pr_pending: —          # opcional — url do PR quando aberto e ainda sem confirmacao de merge (logica do sweep automatico em dashboard-visual/scripts/build-dashboard.ps1)
 plan_active: plano-1          # so task-planning com multiplos planos
 related:
   - task-code/101034-terminal-side-sheet.md
-  - testes/101034-aurora-sheet-testes.md
+  - testes/101034-side-sheet-testes.md
 updated: YYYY-MM-DD
-author: Jonathan Nascimento
+author: Seu Nome
 ---
 ```
 
@@ -259,7 +273,7 @@ nunca primeira pessoa do plural.
 - Se ja existe `testes/NN-testes-{task}.md` → **atualizar**, nao criar outro
 - Secoes: `## Testes unitarios` e `## Testes manuais`
 
-Skills: `gbm-backend-testes-unitarios`, `gbm-backend-testes-manuais`, `gbm-frontend-testes-manuais` → gravar no mesmo `testes/`.
+Skills: `testes-manuais` (incluida, back e front) e a skill de testes unitarios do seu fluxo, se houver → gravar no mesmo `testes/`.
 
 ## Progresso — execucao continua
 

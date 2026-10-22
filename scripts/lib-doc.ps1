@@ -12,6 +12,7 @@ $script:TypeLabels = @{
     'testes' = 'Testes'
     'resumo' = 'Resumo'
     'handover-tecnico' = 'Handover tecnico'
+    'delegada' = 'Delegada'
 }
 
 $script:StatusLabels = @{
@@ -42,19 +43,28 @@ function Get-LibRoot { return $script:LibRoot }
 # fallback (ex.: desligar a feature) em vez de travar com path/URL alheio.
 function Get-BibliotecaConfig {
     $configPath = Join-Path $script:LibRoot 'biblioteca.config.json'
-    $empty = [PSCustomObject]@{ author = $null; reposBasePath = $null; azureOrgUrl = $null; defaultBranch = $null; githubOrg = $null }
+    # delegarSkill: nome da skill de delegacao chamada pelos botoes do
+    # time.html - default a do repo; quem usa uma versao propria (outro
+    # nome) aponta pra ela aqui. reposAoFim/repoAliases: ver
+    # Get-RepoSortKey (dashboard-lib.ps1).
+    $empty = [PSCustomObject]@{ author = $null; reposBasePath = $null; azureOrgUrl = $null; defaultBranch = $null; githubOrg = $null; delegarSkill = 'delegar-task'; reposAoFim = @(); repoAliases = @{} }
     if (-not (Test-Path $configPath)) { return $empty }
     try {
         $raw = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json
     } catch {
         return $empty
     }
+    $aliases = @{}
+    if ($raw.repoAliases) { $raw.repoAliases.PSObject.Properties | ForEach-Object { $aliases[$_.Name] = "$($_.Value)" } }
     return [PSCustomObject]@{
         author        = if ($raw.author) { $raw.author } else { $null }
         reposBasePath = if ($raw.reposBasePath) { $raw.reposBasePath } else { $null }
         azureOrgUrl   = if ($raw.azureOrgUrl) { $raw.azureOrgUrl } else { $null }
         defaultBranch = if ($raw.defaultBranch) { $raw.defaultBranch } else { $null }
         githubOrg     = if ($raw.githubOrg) { $raw.githubOrg } else { $null }
+        delegarSkill  = if ($raw.delegarSkill) { $raw.delegarSkill } else { 'delegar-task' }
+        reposAoFim    = @($raw.reposAoFim | Where-Object { $_ })
+        repoAliases   = $aliases
     }
 }
 
@@ -216,7 +226,7 @@ function Build-RelatedSection($meta) {
 
 function Serialize-Frontmatter($meta) {
     $lines = @('---')
-    $order = @('number', 'type', 'status', 'repo', 'task', 'branch', 'function', 'titulo_busca', 'stub', 'cluster', 'pseudo_task', 'pr_pending', 'pr_merged', 'pr_rejected', 'plan_active', 'related', 'updated', 'author')
+    $order = @('number', 'type', 'status', 'repo', 'task', 'branch', 'function', 'titulo_busca', 'dev', 'dificuldade', 'estimativa', 'delegada_em', 'stub', 'cluster', 'pseudo_task', 'pr_pending', 'pr_merged', 'pr_rejected', 'plan_active', 'related', 'updated', 'author')
     foreach ($key in $order) {
         if (-not $meta.Contains($key)) { continue }
         if ($key -eq 'related') {
@@ -327,7 +337,7 @@ function Get-NextNumber($docs) {
 # `task: general` que quer um numero curto e buscavel (ver
 # 01-regras-biblioteca.md, campo `pseudo_task`). Faixa 900+ desde
 # 2026-08-24 (decisao do usuario) - nunca colide visualmente com task id
-# real (todo id GBM comeca com 1, ex. 104691) e filtra so digitando "9" na
+# real (ids de work item costumam ter 5-6 digitos, ex. 104691) e filtra so digitando "9" na
 # busca do dashboard. Historico pre-900: comecou em 13/14, renumerado
 # retroativamente pra 901/902 na mesma decisao.
 function Get-NextPseudoTask($docs) {

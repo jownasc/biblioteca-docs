@@ -118,8 +118,8 @@ precisar de julgamento.
    `branch:` no frontmatter com o nome resolvido no passo 3 (aparece no
    topo da pagina de resumo) - atualizar sempre, mesmo se o valor nao
    mudou desde a ultima retomada. Nao precisa reescrever **O que foi
-   implementado**/**REQs seguidas** aqui - isso e' o `task-hub-complete`
-   que finaliza. Rodar `sync-all.ps1` da Biblioteca depois.
+   implementado**/**REQs seguidas** aqui - isso e' o gate de fechamento
+   do `controle-documentacao` que finaliza. Rodar `sync-all.ps1` da Biblioteca depois.
 
 ## Convencao do rotulo de checkpoint
 

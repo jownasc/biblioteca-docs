@@ -10,36 +10,33 @@ Converte um documento markdown da Biblioteca (frontmatter YAML padrão) para
 PDF em tema escuro, replicando a paleta real do dashboard. Roda 100% local
 via CLI — sem enviar nada pra fora.
 
-## Motor: só wkhtmltopdf (decisão fechada, não reabrir sem motivo novo)
+## Motor: Edge (Chromium) headless
 
-Testado nesta máquina em 2026-09-11: `weasyprint` falha ao importar mesmo
-com o runtime GTK3 instalado (2 tentativas — pacote `GtkD.GtkPlusRuntime.x64`
-do winget e o instalador oficial recomendado pela própria documentação do
-weasyprint, `tschoonj/GTK-for-Windows-Runtime-Environment-Installer` — as
-duas com o mesmo erro `cannot load library 'libgobject-2.0-0'`). Não é um
-problema de instalação malfeita, é incompatibilidade de fundo do weasyprint
-com Windows nativo — não insistir de novo sem um motivo concreto novo (ex.:
-nova versão do weasyprint que resolva isso).
+Desde 2026-10-07 o PDF sai do Edge em modo headless (`--print-to-pdf`), que
+já vem instalado em todo Windows. O script procura `msedge`, depois Chrome.
 
-`wkhtmltopdf` (build **"patched Qt"**, confirmada com `wkhtmltopdf
---version`) funciona de ponta a ponta pro corpo do documento. Margem nativa
-fica em 0 (fundo escuro cobre a página até a borda via CSS, não via
-`--header-html`/`--footer-html` — ver "Fundo até a última página" abaixo
-pra por que essa ideia foi abandonada).
+Por que trocou do `wkhtmltopdf` (WebKit de 2012):
+
+- **Margem só na página 1.** A margem nativa do wkhtmltopdf sai branca; para
+  manter o fundo escuro até a borda era preciso margem 0 e simular o respiro
+  com `padding` do `body`, que só existe na primeira página. No Chromium,
+  `box-decoration-break: clone` repete o `padding` em cada página.
+- **Sem regras modernas de paginação.** `break-after`, `orphans`/`widows` e
+  `:has()` eram ignorados, então manter título/texto/figura juntos dependia
+  de regex no HTML. No Chromium é CSS nativo.
+- **Fundo até o fim da última página** exigia renderizar até 3 vezes e medir
+  o PDF com poppler. No Chromium o fundo do `html` cobre a folha inteira.
+
+`weasyprint` segue descartado: falha ao carregar `libgobject` no Windows
+mesmo com o runtime GTK3 oficial (testado em 2026-09-11, 2 instaladores).
+
+Versão anterior (wkhtmltopdf) no histórico git da Biblioteca.
 
 ## Dependências — não checar antes de converter
 
-Python, pandoc, `wkhtmltopdf`, `poppler` e as libs Python (`pyyaml`,
-`pillow`) — instaladas uma vez por máquina (comandos em
-"Reinstalar/diagnosticar" no fim). **Ir direto pra "Uso" abaixo** — não
-rodar `winget install`, `pip install` nem comando de verificação de versão
-antes de converter, isso é passo repetido à toa a cada pedido de PDF. O próprio script já
-resolve os binários sozinho, mesmo se o PATH da sessão atual estiver
-desatualizado (comum no meio de uma sessão do Claude Code — `wkhtmltopdf`,
-`pdfinfo` e `pdftoppm` têm fallback embutido pro path de instalação do
-winget, `find_wkhtmltopdf`/`find_poppler_tool` no script). Se a conversão
-falhar com um erro real de "não encontrado", **aí sim** trocar pra
-diagnosticar — ver "Reinstalar/diagnosticar" no fim deste doc.
+Python (`pyyaml`), pandoc e Edge/Chrome. **Ir direto pra "Uso"** — não rodar
+`winget install`, `pip install` nem verificação de versão antes de
+converter. Só diagnosticar se a conversão falhar de verdade (ver o fim).
 
 ## Uso
 
@@ -50,58 +47,68 @@ python ".claude\skills\biblioteca-pdf-export\scripts\convert_to_pdf.py" <caminho
 (path relativo à raiz da Biblioteca — a skill mora no próprio repo.)
 
 Sem `caminho\de\saida.pdf`, o PDF vai pra `Biblioteca\exportacoes\`, mesmo
-nome do `.md` de origem. Pasta `exportacoes/` é versionada no git da
-Biblioteca (documento como os outros, mantém histórico de export) — só não
-é escaneada pelo `sync-all.ps1` (não é `.md`, o glob já ignora sozinho).
-
-Console informa quando termina:
+nome do `.md` de origem. `exportacoes/` é versionada no git da Biblioteca e
+não é escaneada pelo `sync-all.ps1`.
 
 ```
-(motor: wkhtmltopdf)
-OK: C:\...\exportacoes\108364-classification-metrics-reativacao.pdf
+(motor: Edge headless)
+OK: C:\...\exportacoes\108364-metricas-reativacao.pdf
 ```
 
-Para converter todos os `.md` de uma pasta (ex.: todos os
-`handover-tecnico/`):
+## Opções por documento (frontmatter)
 
-```powershell
-Get-ChildItem "handover-tecnico\*.md" | ForEach-Object {
-  python ".claude\skills\biblioteca-pdf-export\scripts\convert_to_pdf.py" $_.FullName
-}
-```
+**Padrão: A4 retrato, sem capítulos** — o mesmo formato de sempre.
+
+**Paisagem automática:** se o `.md` tem pelo menos um print de tela largo
+(imagem local com 1000px ou mais de largura e proporção de 1,3 ou mais), o
+documento inteiro sai em paisagem — em retrato o print fica pequeno demais
+para ler. O motor não mistura orientação por página.
+
+| Campo | Efeito |
+|---|---|
+| `pdf_orientation: landscape` | Força paisagem (quando o usuário pedir, mesmo sem imagem). |
+| `pdf_orientation: portrait` | Força retrato, mesmo com prints largos (desliga a regra automática). |
+| `pdf_chapters: true` | Cada `##` (h2) começa em página nova, como seção primária em ABNT. O primeiro h2 não quebra, para o cabeçalho não ficar sozinho. Só quando pedido. |
+
+Quando o usuário pedir "muda para paisagem/retrato" ou "capítulo em página
+nova", gravar o campo correspondente no frontmatter do `.md` (o pedido vale
+para os próximos exports do mesmo doc) e regerar.
+
+## Formatação (inspirada na ABNT, sem rigidez)
+
+- **Margens em todas as páginas**: 20mm em cima, 18mm nas laterais e embaixo.
+- **Hierarquia de espaço**: mais respiro antes de um título do que depois;
+  título nunca fica sozinho no pé da página (`break-after: avoid`).
+- **Parágrafos**: sem linha órfã ou viúva (`orphans`/`widows: 3`).
+- **Figuras**: `![Legenda](img/...)` com caminho relativo ao `.md` (o script
+  converte para `file:///`). Saem numeradas, com "Figura N — Legenda" acima
+  da imagem, legenda e imagem centralizadas, com respiro em volta e nunca
+  partidas. O parágrafo imediatamente anterior fica na mesma página da
+  figura. Em paisagem toda figura tem a **mesma altura (112mm)**, inclusive
+  capturas de resolução menor; em retrato ocupa a largura total (teto de
+  150mm). Título + parágrafo + figura precisam caber numa página (~172mm
+  úteis em paisagem): se não couberem, o bloco inteiro vai para a próxima e
+  sobra espaço na anterior — nesse caso encurte o texto antes da figura.
+- **Tabelas**: quebram entre linhas (nunca no meio de uma linha) e repetem o
+  cabeçalho na página seguinte.
+- **Página nova manual**: `<div class="page-break"></div>` numa linha própria
+  do `.md`. Invisível no markdown renderizado.
 
 ## Como funciona
 
 1. Lê o frontmatter YAML (`number`, `type`, `status`, `repo`, `task`,
    `author`, `updated`, `titulo_busca`, `function`, `pr_merged`,
-   `pr_pending`).
-2. Remove `<!-- badge:auto -->` e `<!-- meta:auto -->`/`<!-- related:auto -->`
-   do corpo — auto-gerados pelo `sync-header.ps1`, não fazem sentido num
-   PDF estático (o `<details>` de metadados não tem como simular
-   "abrir/fechar" impresso).
-3. Cor de destaque por `type` — **as mesmas cores dos chips do dashboard**
-   (`TYPE_ACCENT` no script, ver tabela abaixo), não uma paleta inventada.
-4. Título do PDF: `titulo_busca` em destaque (H1) com `function` como
-   subtítulo logo abaixo — mesma hierarquia do card do dashboard (título
-   grande = do que se trata, subtítulo = identificação da task). Sem
-   `titulo_busca`, `function` sozinho vira o título.
-5. `<title>` do HTML/PDF (metadado do arquivo, não o texto visível) = nome
-   do `.md` de origem sem extensão.
+   `pr_pending`, `pdf_orientation`, `pdf_chapters`).
+2. Remove `<!-- badge:auto -->`, `<!-- meta:auto -->` e
+   `<!-- related:auto -->` do corpo (gerados pelo `sync-header.ps1`).
+3. Cor de destaque por `type` — as mesmas cores dos chips do dashboard
+   (`TYPE_ACCENT`).
+4. Título do PDF: `titulo_busca` em destaque com `function` como subtítulo;
+   sem `titulo_busca`, `function` vira o título.
+5. `<title>` do PDF = nome do `.md` sem extensão.
 6. Corpo convertido via `pandoc --from=markdown+pipe_tables+fenced_code_blocks --to=html5`.
-7. Subtítulo (`h2`/`h3`) imediatamente seguido de tabela vira `<caption>`
-   dentro da própria tabela (`wrap_heading_with_next_block`) — inseparável
-   dela em qualquer motor, evita subtítulo órfão numa página enquanto a
-   tabela vai pra próxima. Seguido de `pre`/`blockquote`/`details`/`p`, os
-   dois viram um bloco só (`page-break-inside:avoid`) pelo mesmo motivo.
-8. CSS do tema escuro aplicado, renderizado com `wkhtmltopdf` (margem
-   nativa 0, fundo cobre a página até a borda via CSS).
-9. **Fundo até a última página** (duas passadas): renderiza uma vez, mede
-   com `poppler`+`Pillow` (se disponíveis) quanto de branco sobra abaixo do
-   último conteúdo real na ÚLTIMA página, e só se sobrar algo relevante
-   (`measure_trailing_gap_mm` > 5mm) regenera com um preenchimento do
-   tamanho exato medido. Ver "Fundo até a última página" abaixo pra
-   entender por que isso precisou de medição real (nada mais simples
-   funcionou de forma confiável).
+7. HTML gravado numa pasta temporária e impresso pelo Edge headless com
+   perfil próprio (`--user-data-dir`), para não se anexar ao navegador aberto.
 
 ### Cores por tipo (`TYPE_ACCENT` no script — mesmas do dashboard)
 
@@ -116,84 +123,29 @@ Get-ChildItem "handover-tecnico\*.md" | ForEach-Object {
 | `resumo` | roxo `#9a83c9` (sem chip no dashboard — cor própria) |
 
 Tipo sem entrada em `TYPE_ACCENT` cai no dourado padrão (`DEFAULT_ACCENT`).
-Pra ajustar, editar o dict no topo do script — nada de cor hardcoded no
-meio do CSS.
-
-## Fundo até a última página (por que precisou de medição real)
-
-`wkhtmltopdf` tem um limite real: o fundo escuro do `body`/`.page-bg`
-(`position:fixed`, repete página a página) cobre certinho as páginas do
-meio, mas **não se repete no trecho da última página que sobra além do
-conteúdo real** — ali fica branco, e num tema escuro isso salta aos olhos.
-Três ideias mais simples foram tentadas e descartadas, nessa ordem:
-
-1. **Calcular via JS** (`altura total do body % altura da página A4`) e
-   completar com um filler — errado na prática: o próprio mecanismo de
-   manter subtítulo+bloco juntos (`wrap_heading_with_next_block`) já força
-   saltos antecipados de página em vários pontos, então "altura total" não
-   tem relação simples com o que sobra de verdade na última página. Chegou
-   a criar uma página extra quase inteira em branco (overshoot).
-2. **Rodapé nativo com margem reservada** (`--footer-html` + `--margin-bottom`
-   fixo) — o rodapé em si é confiável em toda página (nunca falha, ao
-   contrário do `.page-bg`), mas reservar uma margem fixa reduz o espaço
-   útil de conteúdo em TODA página, o que faz o mecanismo de manter bloco
-   junto empurrar seções inteiras mais cedo — trocou um vão isolado na
-   última página por vãos menores espalhados pelo meio do documento. Pior.
-3. **Medição real, duas passadas** (o que ficou): renderiza uma vez,
-   rasteriza só a ÚLTIMA página com `pdftoppm` (poppler) e varre de baixo
-   pra cima com `Pillow` procurando onde o branco (a cor do vão, não a cor
-   de fundo — cuidado, inverter essa lógica é o bug mais fácil de
-   reintroduzir aqui) começa. Só assim sabe o tamanho EXATO do
-   preenchimento necessário — sem chute, sem estourar página nova
-   (`measure_trailing_gap_mm`, margem de segurança de 3mm pra baixo). A
-   medição subestima um pouco o vão real (transição anti-serrilhada entre
-   conteúdo e branco) — por isso o loop em `convert()` é **iterativo** (até
-   3 rodadas: mede, preenche, mede de novo, completa o que ainda faltar),
-   não confia na primeira medição sozinha. Só roda passada extra se o vão
-   for > 5mm (documentos que já preenchem a página não pagam o custo extra).
 
 ## Ajustar depois
 
-- **Espaçamento**: `line-height`/`margin` de `p`, `h2`, `h3` dentro de `css()`.
-- **Quebra de página**: tabela/`pre`/`blockquote`/`details`/`p` logo após
-  um `h2`/`h3` viram um bloco só (ver "Como funciona", item 7) — se não
-  couber, o bloco pula inteiro pra próxima página, nunca quebra no meio.
+- **Espaçamento**: `margin` de `p`, `h2`, `h3`, `figure` em `css()`.
+- **Margens da página**: `padding` do `body` em `css()` (não usar margem do
+  `@page`, que sai branca).
 - **Novo tipo de documento**: somar entrada em `TYPE_ACCENT`.
-- **Não usar `display:flex`** no CSS — `wkhtmltopdf` não renderiza direito.
-- **DPI da medição de vão** (`measure_trailing_gap_mm`, param `dpi`): 100 é
-  suficiente e rápido; só subir se algum falso positivo aparecer (texto
-  muito fino não detectado).
 
 ## Problemas conhecidos
 
-- Emoji: só `✅`/`❌`/`⚠️` têm tratamento (viram `✔`/`✘`/`⚠` coloridos via
-  CSS — são os 3 usados de verdade nos templates de `testes.md`). Outro
-  emoji que aparecer num doc não vai renderizar bem — considerar o mesmo
-  tratamento se acontecer.
-- `pr_pending` aparece marcado como "(pendente)" na mesma linha de
-  `pr_merged` — não tem badge visual diferente, só o texto.
-- Sem `poppler`/`Pillow` instalados, o PDF sai correto mas a última página
-  pode sobrar com uma tira branca no fim (ver seção acima) — não é erro,
-  é a correção automática que não roda sem essas duas dependências.
-- No Chrome, pode aparecer uma tira branca **só depois da última página**
-  (não entre páginas) mesmo com o PDF correto — confirmado via inspeção
-  direta do content stream (`pikepdf`) e renderização via `poppler`: o
-  retângulo de fundo cobre a página inteira, sem nenhum fill branco. É
-  comportamento do visualizador (espaço reservado após o fim do
-  documento), não do arquivo — testar noutro visualizador (Edge, leitor
-  padrão do Windows) confirma.
+- Emoji: só `✅`/`❌`/`⚠️` têm tratamento (viram `✔`/`✘`/`⚠` coloridos).
+- `pr_pending` aparece como "(pendente)" na linha de PRs, sem badge próprio.
+- Bloco maior que uma página (figura muito alta, `pre` enorme) não tem como
+  ficar inteiro; o motor quebra onde der.
+- Sem número de página (o Edge headless roda com `--no-pdf-header-footer`).
 
-## Reinstalar/diagnosticar (só se a conversão falhar de verdade)
-
-Checar dependências:
+## Diagnosticar (só se a conversão falhar de verdade)
 
 ```powershell
 python --version
 pandoc --version
-wkhtmltopdf --version
 python -c "import yaml; print('pyyaml OK')"
-python -c "from PIL import Image; print('Pillow OK')"
-pdfinfo -v
+Test-Path "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 ```
 
 Instalar o que faltar:
@@ -201,18 +153,5 @@ Instalar o que faltar:
 ```powershell
 winget install --id Python.Python.3.12 -e
 winget install --id JohnMacFarlane.Pandoc -e
-winget install --id wkhtmltopdf.wkhtmltox -e
-winget install --id oschwartz10612.Poppler -e
-python -m pip install pyyaml pillow
+python -m pip install pyyaml
 ```
-
-`wkhtmltopdf` **não fica no PATH persistido** nesta máquina (nem usuário
-nem sistema — confirmado, 2026-09-11) mesmo depois de instalado; funciona
-só por causa do fallback hardcoded no script
-(`_WKHTMLTOPDF_FALLBACK_PATH`, aponta pra `C:\Program Files\wkhtmltopdf\bin`).
-`pandoc` e `poppler` ficam no PATH do usuário normalmente. Se reinstalar
-`wkhtmltopdf` numa versão/pasta diferente, atualizar esse path fixo no
-script.
-
-`poppler`/`Pillow` são **opcionais**: sem eles, o script converte
-normalmente, só sem a correção de fundo branco no fim da última página.

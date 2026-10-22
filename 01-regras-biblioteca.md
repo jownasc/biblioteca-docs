@@ -34,16 +34,17 @@ Biblioteca/
 ├── INDEX.md                  # gerado
 ├── CATALOGO.md                # gerado
 ├── 01-regras-biblioteca.md
-├── _ferramenta/                # o "motor" — scripts, dashboard, screenshots
-│   ├── scripts/                # sync-header, lint-clusters, build-index, sync-all, pre-commit-check
-│   ├── dashboard-visual/        # dashboard HTML gerado + skills locais (task-hub-*)
-│   └── docs/screenshots/        # imagens do README
+├── scripts/                    # sync-header, lint-clusters, build-index, sync-all, pre-commit-check
+├── dashboard-visual/           # dashboard HTML gerado + skills locais (task-hub-*)
+├── docs/screenshots/           # imagens do README
+├── .claude/skills/             # controle-documentacao, delegar-task, testes-manuais etc.
 ├── _templates/                # task-code, task-planning, testes, resumo, handover-tecnico, progresso
 ├── task-code/
 ├── task-planning/
 ├── testes/
 ├── resumo/
 ├── handover-tecnico/
+├── delegadas/                  # opcional - tasks passadas pra devs do time + devs.json (pagina Time do dashboard)
 ├── progresso/                  # doc de trabalho, sobrescrito, fora do indice numerado e do sync-all.ps1
 ├── reqs/                       # REQ/card original verbatim, fora do indice numerado
 ├── planos/                     # backup automatico de todo plano de ExitPlanMode (hook), fora do indice numerado
@@ -61,6 +62,7 @@ Biblioteca/
 | `testes` | Unitários + manuais no mesmo doc, um por task |
 | `resumo` | Dado factual pro dashboard — status/implementado/REQs/falta. **Um por task+repo**, nunca mais de um (ver "Regras de status" abaixo) |
 | `handover-tecnico` | Módulo, playbook, contrato, convenções, debug consolidado |
+| `delegada` | Task passada pra outro dev do time: análise (tela/repo/causa/atenção/dificuldade), dev, PRs e rodadas de review. **Um por task** (`repo:` lista todos os repos). Entra no índice, mas só aparece na página **Time** (`time.html`), nunca na grade principal. Fluxo na skill `delegar-task`; devs em `delegadas/devs.json` (botão "+ Dev") |
 | `reqs` | Card/issue do seu rastreador de tarefas (+ item pai, se houver) colado verbatim — referência crua, fora do índice numerado e do `sync-all.ps1` |
 | `planos` | Cópia bruta de cada plano aprovado em `ExitPlanMode` — sem vínculo com task/repo, backup histórico. Copiado automaticamente por hook (`~/.claude/settings.json`, `PermissionRequest` no matcher `ExitPlanMode`), não por ação manual do agente. Fora do índice numerado e do `sync-all.ps1` |
 | `progresso` | Doc de trabalho por task, sobrescrito (não log) — reflete o estado atual da implementação, pra sobreviver a sessão cair no meio. Atualizado a cada divergência relevante do `task-planning`. Fora do índice numerado e do `sync-all.ps1`; arquivado em `_archive/progresso/` quando a task fecha |
@@ -87,7 +89,7 @@ testes:                          {taskId|pseudo_task|general}-{slug}-testes.md
 handover-tecnico:                {taskId|pseudo_task|general}-{slug}-handover-tecnico.md
 ```
 
-Ex.: `101034-terminal-side-sheet.md` (task-code), `101034-aurora-sheet-testes.md`
+Ex.: `101034-terminal-side-sheet.md` (task-code), `101034-side-sheet-testes.md`
 (testes), `901-checkpoint-melhorias-biblioteca-handover-tecnico.md`
 (handover-tecnico, `task: general` com `pseudo_task: 901`).
 
@@ -122,7 +124,7 @@ na pasta certa, rodar `sync-all.ps1`.
 | `superseded` | Substituído por outro doc — `related:` aponta pro novo |
 | `archived` | Histórico encerrado sem substituto, ou seção antiga dentro de um planning consolidado |
 | `cluster:` | Nome curto de agrupamento pra tasks `task: general` — vira o título do card no dashboard E a chave de agrupamento (em vez de "Geral" solto). Mesmo texto em todo doc do mesmo assunto |
-| `pseudo_task:` | Opcional, só pra `task: general` — número curto sequencial na faixa **900+** (contador próprio, separado do `number:` global; ver `INDEX.md`, campo "Próximo pseudo_task") pra achar o card pela busca do dashboard também por número, não só pelo nome do `cluster`. Aparece no título do card como `Cluster (#N)`. Faixa 900+ desde 2026-08-24 — nunca colide visualmente com task id real (todo id GBM começa com 1, ex. `104691`) e filtra só digitando "9" na busca |
+| `pseudo_task:` | Opcional, só pra `task: general` — número curto sequencial na faixa **900+** (contador próprio, separado do `number:` global; ver `INDEX.md`, campo "Próximo pseudo_task") pra achar o card pela busca do dashboard também por número, não só pelo nome do `cluster`. Aparece no título do card como `Cluster (#N)`. Faixa 900+ desde 2026-08-24 — nunca colide visualmente com task id real (ids de work item costumam ter 5-6 dígitos, ex. `104691`) e filtra só digitando "9" na busca |
 | `pr_pending` / `pr_merged` / `pr_rejected` | URL do PR — preenchidos por um sweep automático (`gh pr view`) rodado pelo `build-dashboard.ps1`, não à mão. Ao mergear, o sweep também fecha `status: completed` sozinho |
 | `plan_active` | Só em `task-planning` com múltiplos planos — indica qual seção está em execução |
 
@@ -181,9 +183,8 @@ mínimo (`task`, `repo`, `updated`), sem `number:`.
 | `sync-header.ps1` | YAML → tabela no corpo |
 | `lint-clusters.ps1` | Trava o sync se houver `cluster` divergente num grupo, ou mais de um `resumo` ativo no mesmo cluster/task+repo |
 | `build-index.ps1` | Gera `INDEX.md` + `CATALOGO.md` |
-| `dashboard-visual/scripts/build-dashboard.ps1` | Gera o dashboard (`dashboard.html`, `paleta.html`, `archive.html`, `summaries/*.html`) |
+| `dashboard-visual/scripts/build-dashboard.ps1` | Gera o dashboard (`dashboard.html`, `paleta.html`, `archive.html`, `pendencias.html`, `nova-task.html`, `time.html`, `summaries/*.html`) |
 | `sync-all.ps1` | Roda os 4 acima em ordem (aborta em `sync-header`/`lint-clusters` se achar problema) — sempre rodar depois de editar |
-| `unify-type-folders.ps1` | Migração pontual (já rodada) — removeu a subpasta `frontend`/`backend` de dentro de cada tipo. Não precisa rodar de novo |
 | `.git/hooks/pre-commit` → `pre-commit-check.ps1` | Trava o commit se um `.md` estiver corrompido/anormal — automático, não precisa lembrar |
 
 O agente **não** edita tabela, `INDEX.md` nem `CATALOGO.md` manualmente.
@@ -195,7 +196,7 @@ O agente **não** edita tabela, `INDEX.md` nem `CATALOGO.md` manualmente.
 [`README.md`](README.md) — visão geral e tour do dashboard, com screenshots.
 [`dashboard-visual/CLAUDE.md`](dashboard-visual/CLAUDE.md) — como o dashboard
 funciona por dentro (favoritos, resumo, página de Arquivo, skills locais
-`task-hub-resume`/`task-hub-complete`/`task-hub-qa`).
+`task-hub-resume`/`task-hub-qa`).
 
 <!-- meta:auto -->
 <details>

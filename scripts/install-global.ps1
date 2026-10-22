@@ -17,10 +17,12 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
 # 1. Skills usadas de dentro de outros repos. biblioteca-setup,
 # importar-historico-github e task-hub-* ficam so' no repo (so' fazem
-# sentido com a sessao aberta aqui).
+# sentido com a sessao aberta aqui). Skill que nao existe nesta copia e'
+# pulada (quem usa versao propria com outro nome nao recebe duplicata).
 New-Item -ItemType Directory -Force -Path $SkillsDir | Out-Null
-foreach ($name in 'controle-documentacao', 'biblioteca-pdf-export') {
+foreach ($name in 'controle-documentacao', 'biblioteca-pdf-export', 'delegar-task', 'testes-manuais', 'mock-completo', 'evidencia-imagem') {
     $src = Join-Path $root ".claude\skills\$name"
+    if (-not (Test-Path $src)) { continue }
     $dst = Join-Path $SkillsDir $name
     $item = Get-Item $dst -Force -ErrorAction SilentlyContinue
     if ($item -and $item.LinkType -eq 'Junction') {

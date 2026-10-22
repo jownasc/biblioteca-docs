@@ -93,7 +93,7 @@ $catalogo = @(
     ''
 )
 
-$groupOrder = @('task-code', 'task-planning', 'testes', 'resumo', 'handover-tecnico', 'rules')
+$groupOrder = @('task-code', 'task-planning', 'testes', 'resumo', 'handover-tecnico', 'delegada', 'rules')
 foreach ($type in $groupOrder) {
     $group = $rows | Where-Object { $_.Type -eq $type } | Sort-Object Num -Descending
     if ($group.Count -eq 0) { continue }
