@@ -5,10 +5,10 @@ status: draft
 repo: nome-do-seu-repo
 task: TASK_ID
 function: Resumo do card/issue — uma linha
-titulo_busca: Reativacao toggle inline classification-metrics  # obrigatorio - palavras-chave da tarefa, curto (bater o olho e entender)
+titulo_busca: Reativacao toggle inline metricas  # obrigatorio - palavras-chave da tarefa, curto (bater o olho e entender)
 stub: —
 related:
-  - handover-tecnico/903-aurora-sheet-handover-tecnico.md
+  - handover-tecnico/903-side-sheet-handover-tecnico.md
 updated: YYYY-MM-DD
 author: —
 ---

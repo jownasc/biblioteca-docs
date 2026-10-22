@@ -75,10 +75,45 @@ powershell -ExecutionPolicy Bypass -File scripts/sync-all.ps1
 
 Inclui ferramentas prontas para integração com agentes de IA (Claude Code / DevTools):
 
-- `controle-documentacao`: Gatekeeper que valida templates, nomes, frontmatter e dispara a sincronização.
-- `biblioteca-setup`: Configuração inicial guiada e instalação de hooks globais.
-- `biblioteca-pdf-export`: Exportação de handovers e specs para PDFs vetoriais executivos.
-- `task-hub-resume` / `-qa` / `-complete`: Ações disparadas diretamente pelos botões do dashboard.
+| Skill | Papel |
+|-------|-------|
+| `controle-documentacao` | Gate pra criar/editar qualquer doc (template, status, sync) |
+| `biblioteca-setup` | Cadastro guiado na primeira sessão |
+| `importar-historico-github` | Gera `resumo/` a partir dos seus PRs no GitHub |
+| `biblioteca-pdf-export` | Converte um doc em PDF no tema do dashboard (pra mandar pra PO/QA) |
+| `testes-manuais` | Monta e registra o roteiro de teste manual (API ou tela) no doc `testes/` da task |
+| `mock-completo` | Garante que dado mockado pra teste local cubra o fluxo inteiro da task |
+| `delegar-task` | Analisa uma task, passa pra outro dev, acompanha PRs e registra o review (página **Time**) |
+| `evidencia-imagem` | Monta um PNG de evidência (prints + destaques + regras) em `exportacoes/` |
+| `task-hub-resume` / `task-hub-qa` | Acionadas pelos botões do dashboard |
+
+Ficam em `.claude/skills/` e `dashboard-visual/.claude/skills/`. As que
+fazem sentido fora da Biblioteca (todas menos `biblioteca-setup`,
+`importar-historico-github` e `task-hub-*`) também viram globais
+(junction em `~/.claude/skills`, feito no setup).
+
+### E o fluxo de desenvolvimento?
+
+A Biblioteca não traz skills de triagem, plano, TDD, review ou git — ela
+se pluga em qualquer fluxo. O contrato é a tabela **Gatilhos automáticos**
+do `controle-documentacao`: evento do fluxo (plano aprovado, testes
+rodados, PR aberto, task fechada) → o que atualizar na Biblioteca. Funciona
+com o fluxo do seu `CLAUDE.md`, com um público como o
+[superpowers](https://github.com/obra/superpowers), ou sem fluxo nenhum.
+
+A página **Time** é opcional: crie a pasta `delegadas/` (ou deixe a skill
+`delegar-task` criar na primeira delegação) pra ela aparecer no header.
+
+---
+
+## ⚠️ Limitações
+
+- **Só Windows** (scripts `.ps1`).
+- **Um usuário, local** — favoritos ficam no `localStorage` do navegador.
+- **Cores de PR exigem `gh` autenticado**; sem ele os pills ficam cinza.
+- **Opcionais:** Azure DevOps (`azureOrgUrl` no config), protocolo
+  `biblioteca-cmd-run:` (`register-protocol.ps1`, sem ele os botões só
+  copiam pro clipboard) e MCP `azure-devops` (somente leitura).
 
 ---
 

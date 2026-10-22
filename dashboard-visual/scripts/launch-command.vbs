@@ -1,28 +1,21 @@
-' Handler dos protocolos custom "biblioteca-cmd:"/"biblioteca-cmd-run:"
-' registrados via register-protocol.ps1. Recebe a URI clicada no dashboard/
-' resumo (<protocolo>:<comando url-encoded>), abre um cmd novo e DIGITA o
-' comando decodificado. "biblioteca-cmd:" NUNCA aperta Enter (usuario revisa
-' e confirma manualmente - task nova, retomar, ajustar QA). "biblioteca-cmd-
-' run:" aperta Enter sozinho - so pra acao sem risco de disparar skill/gravar
-' nada (ex: abrir uma janela solta do Claude num repo).
+' Handler do protocolo custom "biblioteca-cmd-run:" registrado via
+' register-protocol.ps1. Recebe a URI clicada no dashboard/resumo
+' (biblioteca-cmd-run:<comando url-encoded>), abre um cmd novo, DIGITA o
+' comando decodificado e aperta Enter. A confirmacao fica dentro de cada
+' fluxo (a skill rele os docs antes de agir; o prompt do Nova Task pede
+' confirmacao do work item antes de gravar). O antigo "biblioteca-cmd:"
+' (sem Enter) nao tinha mais nenhum botao usando e foi removido - um
+' protocolo registrado sem uso e' so' superficie de ataque.
 Option Explicit
 
-Dim uri, prefixRun, prefixManual, encoded, decoded, shell, autoEnter
+Dim uri, prefixRun, encoded, decoded, shell
 
 If WScript.Arguments.Count < 1 Then WScript.Quit 1
 uri = WScript.Arguments(0)
 
 prefixRun = "biblioteca-cmd-run:"
-prefixManual = "biblioteca-cmd:"
-autoEnter = False
-If LCase(Left(uri, Len(prefixRun))) = prefixRun Then
-    encoded = Mid(uri, Len(prefixRun) + 1)
-    autoEnter = True
-ElseIf LCase(Left(uri, Len(prefixManual))) = prefixManual Then
-    encoded = Mid(uri, Len(prefixManual) + 1)
-Else
-    encoded = uri
-End If
+If LCase(Left(uri, Len(prefixRun))) <> prefixRun Then WScript.Quit 1
+encoded = Mid(uri, Len(prefixRun) + 1)
 
 decoded = UrlDecode(encoded)
 
@@ -75,7 +68,7 @@ End If
 
 WScript.Sleep 100
 shell.SendKeys EscapeSendKeys(decoded)
-If autoEnter Then shell.SendKeys "{ENTER}"
+shell.SendKeys "{ENTER}"
 
 ' Formato exato que todo gerador legitimo usa (Get-CardCommands/
 ' Get-LaunchUri em build-dashboard.ps1, o builder em nova-task.html):

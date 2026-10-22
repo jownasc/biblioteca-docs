@@ -40,14 +40,13 @@ function Get-Signals($docs, $task) {
 # Comandos copiaveis de um card - usado tanto pelos botoes inline do card
 # quanto pela caixa de acoes da pagina de resumo, pra nao duplicar as
 # strings de comando em dois lugares.
-# Prefixo do protocolo customizado registrado por register-protocol.ps1 -
-# um link biblioteca-cmd:<comando url-encoded> abre um cmd novo com o
-# comando ja digitado (launch-command.vbs), sem apertar Enter. Some sem
-# erro em navegador/maquina sem o protocolo registrado - so o clipboard
-# (fallback de sempre) continua funcionando.
-function Get-LaunchUri([string]$cmdText, [switch]$AutoRun) {
-    $scheme = if ($AutoRun) { 'biblioteca-cmd-run:' } else { 'biblioteca-cmd:' }
-    return $scheme + [Uri]::EscapeDataString($cmdText)
+# Protocolo customizado registrado por register-protocol.ps1 - um link
+# biblioteca-cmd-run:<comando url-encoded> abre um cmd novo, digita o
+# comando e aperta Enter (launch-command.vbs). Some sem erro em navegador/
+# maquina sem o protocolo registrado - so o clipboard (fallback de sempre)
+# continua funcionando.
+function Get-LaunchUri([string]$cmdText) {
+    return 'biblioteca-cmd-run:' + [Uri]::EscapeDataString($cmdText)
 }
 
 function Get-CardCommands([PSCustomObject]$card) {
@@ -67,41 +66,37 @@ function Get-CardCommands([PSCustomObject]$card) {
     $cmds = New-Object System.Collections.Generic.List[PSCustomObject]
     if ($card.Active) {
         $cmd = "powershell -NoProfile -Command `"$base; claude 'retomar task $safeTask no repo $safeRepo'`""
-        $cmds.Add([PSCustomObject]@{ Label = 'Retomar task'; Class = 'copy-btn'; Cmd = $cmd; Uri = (Get-LaunchUri $cmd -AutoRun) })
+        $cmds.Add([PSCustomObject]@{ Label = 'Retomar task'; Class = 'copy-btn'; Cmd = $cmd; Uri = (Get-LaunchUri $cmd) })
     }
     $qaCmd = "powershell -NoProfile -Command `"$base; claude 'ajustar qa task $safeTask no repo $safeRepo'`""
-    $cmds.Add([PSCustomObject]@{ Label = 'Reabrir p/ QA'; Class = 'copy-btn qa-btn'; Cmd = $qaCmd; Uri = (Get-LaunchUri $qaCmd -AutoRun) })
+    $cmds.Add([PSCustomObject]@{ Label = 'Reabrir p/ QA'; Class = 'copy-btn qa-btn'; Cmd = $qaCmd; Uri = (Get-LaunchUri $qaCmd) })
     return $cmds
 }
 
 # Ordenacao logica (nao alfabetica pura): backend + frontend/mfe/mobile do
-# mesmo dominio ficam juntos (settings-backend do lado de mfe-settings),
-# dominios sem par (migrations, geral) ficam depois dos pares, e repos de
-# skills pessoais (nao-projeto) sempre por ultimo. Descarta entradas
-# malformadas (valor com virgula/espaco vindo de frontmatter com 2 repos
-# no mesmo campo por engano - nao e' pasta de verdade).
-$domainAliases = @{ 'schedule' = 'scheduling' }
-$domainRank = @{ 'backoffice' = 0; 'collector' = 1; 'railroad' = 2; 'road' = 3; 'scheduling' = 4; 'settings' = 5; 'stock' = 6 }
-$personalRepos = @('gbm-ai-skills', 'jow-ai-skills', 'ponytail')
-
-function Get-RepoSortKey([string]$repo) {
-    if ($personalRepos -contains $repo.ToLowerInvariant()) {
-        return [PSCustomObject]@{ Bucket = 2; DomainRank = 99; Domain = ''; SubOrder = 0; Name = $repo }
+# mesmo dominio ficam juntos ([org-]app-settings-backend do lado de
+# [org-]mfe-settings), dominios em ordem alfabetica, repos sem esse padrao
+# (migrations, geral) depois dos pares, e os listados em $lastRepos
+# (config `reposAoFim` - ex.: repos de skills, nao-projeto) sempre por
+# ultimo. $aliases (config `repoAliases`) junta dominios com nome diferente
+# entre back e front (ex.: mfe-schedule + app-scheduling-backend). Descarta
+# entradas malformadas (valor com virgula/espaco vindo de frontmatter com
+# 2 repos no mesmo campo por engano - nao e' pasta de verdade).
+function Get-RepoSortKey([string]$repo, [string[]]$lastRepos = @(), $aliases = @{}) {
+    if (@($lastRepos | ForEach-Object { $_.ToLowerInvariant() }) -contains $repo.ToLowerInvariant()) {
+        return [PSCustomObject]@{ Bucket = 2; Domain = ''; SubOrder = 0; Name = $repo }
     }
     $domain = $null
     $subOrder = 3
-    if ($repo -match '^gbm-app-(.+)-backend$') { $domain = $Matches[1]; $subOrder = 0 }
-    elseif ($repo -match '^gbm-mfe-(.+)$') {
-        $raw = $Matches[1]
-        $domain = if ($domainAliases.ContainsKey($raw)) { $domainAliases[$raw] } else { $raw }
-        $subOrder = 1
-    } elseif ($repo -match '^gbm-mobile-(.+)$') { $domain = $Matches[1]; $subOrder = 2 }
+    if ($repo -match '^(?:[^-]+-)?app-(.+)-backend$') { $domain = $Matches[1]; $subOrder = 0 }
+    elseif ($repo -match '^(?:[^-]+-)?mfe-(.+)$') { $domain = $Matches[1]; $subOrder = 1 }
+    elseif ($repo -match '^(?:[^-]+-)?mobile-(.+)$') { $domain = $Matches[1]; $subOrder = 2 }
 
     if ($domain) {
-        $rank = if ($domainRank.ContainsKey($domain)) { $domainRank[$domain] } else { 50 }
-        return [PSCustomObject]@{ Bucket = 0; DomainRank = $rank; Domain = $domain; SubOrder = $subOrder; Name = $repo }
+        if ($aliases.ContainsKey($domain)) { $domain = $aliases[$domain] }
+        return [PSCustomObject]@{ Bucket = 0; Domain = $domain; SubOrder = $subOrder; Name = $repo }
     }
-    return [PSCustomObject]@{ Bucket = 1; DomainRank = 0; Domain = ''; SubOrder = 0; Name = $repo }
+    return [PSCustomObject]@{ Bucket = 1; Domain = ''; SubOrder = 0; Name = $repo }
 }
 
 # Pedacos de HTML compartilhados pelas 3 funcoes que montam um card
@@ -116,6 +111,38 @@ function Get-RepoSortKey([string]$repo) {
 # de Build-Card/Build-QaRoundCard/Build-UnifiedQaRoundCard - se um dia
 # precisar de mais um tipo de card, ele tambem chama essas 3 funcoes, nao
 # escreve o HTML de novo.
+
+# --- Delegadas (pagina time.html) ---------------------------------------
+# Valor de uma linha `| Campo | valor |` da tabela "Analise" de um doc
+# `delegada` - casa pelo prefixo ASCII do rotulo (Tela/Causa/Aten), nunca
+# pelo rotulo inteiro com acento (.ps1 sem BOM corrompe acento literal).
+function Get-DelegadaField([string]$body, [string]$labelPrefix) {
+    $m = [regex]::Match($body, "(?m)^\|\s*\**$labelPrefix[^|]*\|\s*(.+?)\s*\|\s*$")
+    if ($m.Success) { return $m.Groups[1].Value.Trim() }
+    return ''
+}
+
+# Ultima rodada de review registrada pela skill delegar-task
+# (`### Rodada N - data - PR #X - <veredito>` dentro de `## Review`) + a
+# linha `**Resumo:**` dela. Veredito pelo texto do titulo: "Ajustes
+# solicitados" / "Aprovado" (convencao fixa da skill).
+function Get-DelegadaReview([string]$body) {
+    $rounds = [regex]::Matches($body, '(?m)^### Rodada.*$')
+    if ($rounds.Count -eq 0) { return $null }
+    $last = $rounds[$rounds.Count - 1]
+    $heading = $last.Value.Substring(4).Trim()
+    $tail = $body.Substring($last.Index + $last.Length)
+    $next = [regex]::Match($tail, '(?m)^#{2,3} ')
+    if ($next.Success) { $tail = $tail.Substring(0, $next.Index) }
+    $resumo = [regex]::Match($tail, '\*\*Resumo:\*\*\s*(.+)')
+    $verdict = if ($heading -match '(?i)ajuste|mudan') { 'ajustes' } elseif ($heading -match '(?i)aprovad') { 'aprovado' } else { 'comentado' }
+    return [PSCustomObject]@{
+        Count   = $rounds.Count
+        Heading = $heading
+        Resumo  = if ($resumo.Success) { $resumo.Groups[1].Value.Trim() } else { '' }
+        Verdict = $verdict
+    }
+}
 
 function Get-CardHeadHtml([string]$title, [string]$rightIconsHtml) {
     return @"

@@ -93,7 +93,8 @@ sugerir commitar.
 1. Rodar `powershell -ExecutionPolicy Bypass -File scripts/install-global.ps1`
    — deixa a Biblioteca funcionando com o Claude aberto em **qualquer**
    repo (o uso normal é trabalhar no repo do projeto e gravar doc aqui):
-   junction de `controle-documentacao`/`biblioteca-pdf-export` em
+   junction de `controle-documentacao`, `biblioteca-pdf-export`,
+   `testes-manuais`, `mock-completo`, `delegar-task` e `evidencia-imagem` em
    `~/.claude/skills`, hooks globais em `~/.claude/settings.json` (sync
    após gravar doc, backup de plano em `planos/`; faz backup `.bak-*` do
    settings antes) e o guard de pre-commit. Idempotente.

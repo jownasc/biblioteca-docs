@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Biblioteca -> PDF (tema escuro). Uso: python convert_to_pdf.py <arquivo.md> [saida.pdf]
 
-Motor unico: wkhtmltopdf (build "patched Qt", suporta --header-html/
---footer-html com fundo colorido). weasyprint foi testado e descartado
-nesta maquina - falha ao carregar libgobject mesmo com o runtime GTK3
-oficial instalado (2 tentativas: pacote winget GtkD.GtkPlusRuntime.x64
-e o instalador oficial tschoonj/GTK-for-Windows-Runtime-Environment-
-Installer, ambas com o mesmo erro). Nao reintroduzir o fallback duplo
-sem motivo novo - decisao deliberada de manter 1 caminho so.
+Motor unico: Edge (Chromium) headless, --print-to-pdf. Trocado do
+wkhtmltopdf em 2026-10-07: o WebKit de 2012 dele nao tem margem por pagina
+com fundo escuro (a margem nativa sai branca, entao so' a pagina 1 tinha
+respiro no topo), ignora break-after/orphans/widows e exigia medir o PDF
+com poppler para pintar o fundo ate o fim da ultima pagina. O Chromium
+resolve os tres com CSS (box-decoration-break: clone, break-*, :has).
+weasyprint segue descartado (falha ao carregar libgobject no Windows).
 """
-import sys, re, os, subprocess, html, shutil, tempfile, glob
+import sys, re, os, subprocess, html, shutil, tempfile
+from pathlib import Path
 import yaml
 
 THEME = {
@@ -100,37 +101,29 @@ def build_header(fm, doc_title):
     </div>'''
 
 
-def css(accent):
-    # margem nativa do wkhtmltopdf fica em 0 (ver render_pdf) - "margem" visual
-    # e' esse padding do body, nao flag de linha de comando. Motivo: --header-html/
-    # --footer-html (mesmo com build "patched Qt") so' pintam a tira de topo/rodape,
-    # as laterais (--margin-left/right) continuam brancas sempre - so da pra ter
-    # fundo escuro sangrando ate a borda de verdade fazendo o fundo cobrir a
-    # pagina inteira (margem nativa 0) e simulando a margem com padding aqui.
-    # Familia e tamanhos alinhados ao padrao real da Biblioteca (dashboard-visual/
-    # scripts/build-dashboard.ps1): mesma stack de fonte (system-ui/Segoe UI, nao
-    # Helvetica Neue) e mesma stack monoespacada (ui-monospace/SF Mono - Courier
-    # New e' mais dificil de ler em corpo pequeno). Tamanhos em pt calculados a
-    # partir dos rem do dashboard (1rem tela = 16px = 12pt) com folga de leitura
-    # pra papel/PDF - nao e' so' converter 1:1, letra pequena de tela fica ainda
-    # menor impressa.
-    # "ui-monospace" nao e' nome de fonte de verdade (keyword CSS4) - esse
-    # motor antigo (WebKit do wkhtmltopdf) nao resolve direito e cai num
-    # substituto sintetico/mal hinted (traco irregular, "fantasma" no texto -
-    # visivel no Chrome, mesmo com o PDF tecnicamente correto). Comecar
-    # direto com uma fonte real sempre instalada no Windows.
+def css(accent, landscape=False, chapters=False):
+    # Margem de pagina 0 + padding do body com box-decoration-break: clone =
+    # o padding se repete em CADA pagina e o fundo escuro do html cobre a
+    # folha inteira, inclusive a "margem". @page margin daria margem branca.
+    # Fontes alinhadas ao dashboard da Biblioteca (system-ui / Consolas).
     mono = 'Consolas, "Cascadia Code", "Courier New", monospace'
+    size = "A4 landscape" if landscape else "A4"
+    # Altura util em paisagem ~172mm: titulo + paragrafo + legenda + respiro
+    # precisam caber junto com a imagem, senao o texto fica numa pagina e a
+    # figura na outra.
+    img_max_h = "112mm" if landscape else "150mm"
+    # Capitulo (h2) em pagina nova, como secao primaria em ABNT. O primeiro
+    # h2 nao quebra, senao o cabecalho do doc ficaria sozinho na pagina 1.
+    chapter_rule = "h2 ~ h2 { break-before: page; }" if chapters else ""
     return f'''
-    html {{ margin:0; padding:0; background:{THEME["bg"]}; }}
+    @page {{ size:{size}; margin:0; }}
+    html {{ background:{THEME["bg"]}; -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
     * {{ box-sizing:border-box; }}
     body {{ background:{THEME["bg"]}; color:{THEME["text"]}; font-family:system-ui, -apple-system, "Segoe UI", sans-serif;
-            font-size:12pt; line-height:1.65; margin:0; padding:20mm 15mm 16mm 15mm; }}
-    /* position:fixed e' repetido pagina a pagina pelo wkhtmltopdf (unico jeito
-       real de garantir fundo escuro ate' a ultima pagina - sem isso, a area
-       da pagina abaixo de onde o conteudo termina fica branca, porque o
-       fundo do body so' cobre a altura que o conteudo realmente ocupa). */
-    .page-bg {{ position:fixed; top:0; right:0; bottom:0; left:0; background:{THEME["bg"]}; z-index:-1; }}
-    .doc-header {{ padding-bottom:20px; margin-bottom:30px; }}
+            font-size:12pt; line-height:1.6; margin:0; padding:20mm 18mm 18mm 18mm;
+            -webkit-box-decoration-break:clone; box-decoration-break:clone;
+            counter-reset:figura; }}
+    .doc-header {{ padding-bottom:20px; margin-bottom:28px; }}
     .doc-header-top {{ margin-bottom:10px; }}
     .doc-number {{ font-family:{mono}; color:{THEME["dim"]}; font-size:10.5pt; margin-right:12px; }}
     .status-badge {{ display:inline-block; padding:3px 12px; border-radius:14px; font-size:9.5pt; font-weight:600; margin-right:8px; }}
@@ -143,38 +136,47 @@ def css(accent):
     .meta-value {{ color:{THEME["text"]}; font-weight:600; font-size:11pt; display:block; margin-top:2px; }}
     .pr-line {{ margin-top:10px; font-size:11pt; color:{THEME["muted"]}; }}
     .pr-line a {{ color:{accent}; text-decoration:none; }}
-    h1,h2,h3 {{ color:#ffffff; }}
-    /* wkhtmltopdf (WebKit antigo) so' obedece as propriedades page-break-*
-       classicas - break-inside/break-after (nome novo da spec de fragmentacao
-       CSS3) sao ignoradas silenciosamente nesse motor. As duas juntas (h2/h3
-       com page-break-after:avoid + a tabela/bloco seguinte com
-       page-break-inside:avoid) e' o que faz o motor empurrar o subtitulo
-       INTEIRO com o bloco pra proxima pagina em vez de deixar o subtitulo
-       orfao no rodape ou quebrar o bloco no meio. */
-    h2 {{ font-size:15pt; margin-top:34px; margin-bottom:14px; padding-bottom:6px;
-          border-bottom:1px solid {THEME["border"]}; page-break-after:avoid; break-after:avoid; }}
-    h3 {{ font-size:13pt; color:{accent}; margin-top:22px; margin-bottom:8px; page-break-after:avoid; break-after:avoid; }}
-    p {{ margin:9px 0; orphans:3; widows:3; }}
-    ul, ol {{ margin:9px 0; padding-left:24px; }}
+    /* Hierarquia de espaco: mais respiro ANTES do titulo que depois, para ele
+       pertencer ao conteudo de baixo. No topo de pagina o Chromium descarta a
+       margem de cima sozinho. */
+    h1, h2, h3 {{ color:#ffffff; break-after:avoid; }}
+    h2 {{ font-size:15pt; margin:36px 0 12px 0; padding-bottom:6px; border-bottom:1px solid {THEME["border"]}; }}
+    h3 {{ font-size:13pt; color:{accent}; margin:28px 0 8px 0; }}
+    {chapter_rule}
+    p {{ margin:0 0 10px 0; orphans:3; widows:3; }}
+    /* Paragrafo que apresenta a figura seguinte fica na mesma pagina dela. */
+    p:has(+ figure) {{ break-after:avoid; }}
+    ul, ol {{ margin:0 0 12px 0; padding-left:24px; }}
     li {{ margin:4px 0; }}
-    table {{ border-collapse:collapse; width:100%; margin:16px 0; font-size:10.5pt; page-break-inside:avoid; break-inside:avoid; }}
-    caption {{ caption-side:top; text-align:left; font-size:13pt; font-weight:600; color:{accent}; margin-bottom:8px; }}
+    table {{ border-collapse:collapse; width:100%; margin:14px 0 18px 0; font-size:10.5pt; }}
     thead {{ display:table-header-group; }}
+    tr {{ break-inside:avoid; }}
     th, td {{ border:1px solid {THEME["border"]}; padding:7px 10px; text-align:left; vertical-align:top; }}
     th {{ background:{THEME["card_alt"]}; color:{accent}; font-weight:600; }}
     td {{ background:{THEME["card"]}; }}
-    tr {{ page-break-inside:avoid; break-inside:avoid; }}
-    .keep-together {{ page-break-inside:avoid; break-inside:avoid; }}
+    .page-break {{ break-before:page; }}
     code {{ font-family:{mono}; background:{THEME["code_bg"]}; color:{THEME["gold_bright"]};
             padding:2px 5px; border-radius:3px; font-size:10.5pt; }}
     pre {{ background:{THEME["code_bg"]}; color:#d8dadd; padding:14px 16px; border-radius:8px;
-           overflow-x:auto; font-size:10pt; margin:14px 0; border:1px solid {THEME["border"]}; page-break-inside:avoid; break-inside:avoid; }}
+           font-size:10pt; margin:14px 0; border:1px solid {THEME["border"]}; break-inside:avoid; white-space:pre-wrap; }}
     pre code {{ background:none; color:inherit; padding:0; }}
+    /* Figura no estilo ABNT: "Figura N - titulo" ACIMA da imagem, respiro em
+       volta e nunca partida entre paginas. */
+    figure {{ margin:6mm 0 8mm 0; break-inside:avoid; display:flex; flex-direction:column; align-items:center;
+              counter-increment:figura; }}
+    figcaption {{ order:-1; text-align:center; font-size:10pt; font-weight:600; color:{THEME["muted"]}; margin-bottom:3mm; }}
+    figcaption::before {{ content:"Figura " counter(figura) " \\2014  "; color:{accent}; }}
+    /* Paisagem: altura fixa = todas as capturas do mesmo tamanho, mesmo as de
+       resolucao menor (senao saem no tamanho natural, menores que as outras).
+       Retrato: largura total, com teto de altura. */
+    img {{ {"height:" + img_max_h + "; width:auto;" if landscape else "width:100%; max-height:" + img_max_h + ";"}
+           max-width:100%; object-fit:contain;
+           border:1px solid {THEME["border"]}; border-radius:6px; }}
     blockquote {{ border-left:3px solid {accent}; margin:14px 0; padding:8px 16px; color:{THEME["muted"]};
-                  background:{THEME["card"]}; border-radius:0 6px 6px 0; page-break-inside:avoid; break-inside:avoid; }}
+                  background:{THEME["card"]}; border-radius:0 6px 6px 0; break-inside:avoid; }}
     details {{ border:1px solid {THEME["border"]}; border-radius:8px; padding:12px 16px; margin:20px 0;
-               background:{THEME["card"]}; page-break-inside:avoid; break-inside:avoid; }}
-    summary {{ font-weight:600; color:{accent}; cursor:pointer; }}
+               background:{THEME["card"]}; break-inside:avoid; }}
+    summary {{ font-weight:600; color:{accent}; }}
     strong {{ color:#ffffff; }}
     hr {{ border:none; border-top:1px solid {THEME["border"]}; margin:26px 0; }}
     a {{ color:{THEME["teal"]}; }}
@@ -183,47 +185,44 @@ def css(accent):
     '''
 
 
-# (?:(?!</?h[23]\b).)* em vez de .* - sem isso, um heading que NAO e' seguido
-# de tabela/bloco (ex.: "### Comando" seguido de <pre>) faz o .*? non-greedy
-# atravessar até o PROXIMO heading real (ex.: "### Resultado"), engolindo a
-# tag <h3> dele inteira como texto capturado - bug real, encontrado com
-# debug.py (virou "<h3 id=\"resultado\">Resultado</caption>" ao inves de so'
-# "Resultado</caption>").
-_HEADING_TEXT = r'(?:(?!</?h[23]\b).)*?'
-_HEADING_PLUS_TABLE_RE = re.compile(r'<h[23][^>]*>(' + _HEADING_TEXT + r')</h[23]>\s*<table>', re.DOTALL)
-_HEADING_PLUS_BLOCK_RE = re.compile(
-    r'(<h[23][^>]*>' + _HEADING_TEXT + r'</h[23]>)\s*'
-    r'(<(?:pre|blockquote|details|p)\b.*?</(?:pre|blockquote|details|p)>)',
-    re.DOTALL,
-)
-
-
-def wrap_heading_with_next_block(body_html):
-    """h2/h3 seguido direto de tabela/pre/blockquote/details nao pode ficar
-    orfao numa pagina enquanto o bloco vai pra proxima - testado com div
-    wrapper (page-break-inside:avoid) e o wkhtmltopdf ignorou, deixou o
-    subtitulo sozinho na pagina anterior mesmo assim (motor antigo trata
-    <table> com paginacao propria, nao respeita o page-break do <div> em
-    volta). Fix pra tabela: virar <caption> DENTRO da propria <table> - isso
-    e' nativamente inseparavel da tabela em qualquer motor, nao depende de
-    page-break funcionar em elemento nenhum. Pre/blockquote/details continuam
-    com o wrapper de div (nao tem equivalente a caption, melhor esforco)."""
-    body_html = _HEADING_PLUS_TABLE_RE.sub(r'<table><caption>\1</caption>', body_html)
-    return _HEADING_PLUS_BLOCK_RE.sub(r'<div class="keep-together">\1\2</div>', body_html)
+def has_wide_image(body, md_dir):
+    """Print de tela largo (>= 1000px e proporcao >= 1.3) em retrato fica
+    pequeno demais para ler - nesse caso o doc vai para paisagem. Imagem
+    remota ou ilegivel nao conta."""
+    from PIL import Image
+    for src in re.findall(r'!\[[^\]]*\]\(([^)\s]+)', body):
+        path = Path(md_dir, src)
+        if src.startswith(("http:", "https:")) or not path.is_file():
+            continue
+        try:
+            with Image.open(path) as im:
+                w, h = im.size
+        except OSError:
+            continue
+        if w >= 1000 and w / h >= 1.3:
+            return True
+    return False
 
 
 def convert(md_path, pdf_path):
     raw = open(md_path, encoding="utf-8").read()
     fm, body = split_frontmatter(raw)
     accent = TYPE_ACCENT.get(fm.get("type", ""), DEFAULT_ACCENT)
+    # Padrao: retrato, sem capitulos. Paisagem vem sozinha quando o doc tem
+    # print de tela largo; `pdf_orientation: portrait|landscape` no
+    # frontmatter sempre vence. `pdf_chapters: true` = cada h2 em pagina nova.
+    orientation = str(fm.get("pdf_orientation", "")).lower()
+    md_dir = os.path.dirname(os.path.abspath(md_path))
+    landscape = orientation == "landscape" or (
+        orientation != "portrait" and has_wide_image(body, md_dir))
+    chapters = fm.get("pdf_chapters") is True
     doc_title = os.path.basename(md_path).rsplit(".", 1)[0]
 
     body = body.replace("<details>", "<details open>")
     body = re.sub(r'<!-- badge:auto -->.*?<!-- /badge:auto -->\n?', '', body, flags=re.DOTALL)
     body = re.sub(r'<!-- related:auto -->.*?<!-- /related:auto -->\n?', '', body, flags=re.DOTALL)
     body = re.sub(r'<!-- meta:auto -->.*?<!-- /meta:auto -->\n?', '', body, flags=re.DOTALL)
-    # Emoji que os templates novos usam em tabela (testes.md: Teste|Resultado
-    # com nota inline) - so trocar os 3 usados de verdade, nao todo emoji.
+    # Emoji que os templates usam em tabela (testes.md) - so os 3 usados.
     body = body.replace("✅", f'<span style="color:{THEME["green"]}">✔</span>')
     body = body.replace("❌", f'<span style="color:{THEME["red"]}">✘</span>')
     body = body.replace("⚠️", f'<span style="color:{THEME["yellow"]}">⚠</span>')
@@ -231,13 +230,17 @@ def convert(md_path, pdf_path):
     body_html = subprocess.run(
         ["pandoc", "--from=markdown+pipe_tables+fenced_code_blocks", "--to=html5"],
         input=body, capture_output=True, text=True, encoding="utf-8").stdout
-    body_html = wrap_heading_with_next_block(body_html)
+    # O HTML e' renderizado numa pasta temporaria: imagem com caminho relativo
+    # ao .md vira file:/// absoluto, senao o navegador nao a encontra.
+    body_html = re.sub(
+        r'src="(?!https?:|file:|data:)([^"]+)"',
+        lambda m: 'src="' + Path(md_dir, m.group(1)).resolve().as_uri() + '"',
+        body_html)
 
-    # <title> = nome do arquivo .md (sem extensao) - metadado do PDF em si
-    # (aba do leitor/propriedade do arquivo), separado do H1 visual dentro
-    # do documento (que usa titulo_busca/function).
-    full_html = f'''<!DOCTYPE html><html><head><meta charset="utf-8"><title>{html.escape(doc_title)}</title><style>{css(accent)}</style></head>
-    <body><div class="page-bg"></div>{build_header(fm, doc_title)}{body_html}
+    # <title> = nome do .md - metadado do PDF, separado do H1 visual.
+    full_html = f'''<!DOCTYPE html><html><head><meta charset="utf-8"><title>{html.escape(doc_title)}</title>
+    <style>{css(accent, landscape, chapters)}</style></head>
+    <body>{build_header(fm, doc_title)}{body_html}
     <div class="footer-note">Convertido de {html.escape(os.path.basename(md_path))} — Biblioteca de documentação técnica</div>
     </body></html>'''
 
@@ -245,154 +248,40 @@ def convert(md_path, pdf_path):
         html_path = os.path.join(tmpdir, doc_title + ".html")
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(full_html)
-        render_pdf(html_path, pdf_path)
-
-        # Passadas extras, so' se sobrar vao real: mede o branco de verdade na
-        # ULTIMA pagina do PDF ja gerado (via poppler) e completa com um
-        # preenchimento - ver measure_trailing_gap_mm pra por que isso
-        # substitui o calculo teorico (JS/altura de pagina), que se mostrou
-        # errado na pratica. A medicao subestima um pouco o vao real (a
-        # transicao anti-serrilhada entre conteudo e branco nao bate 100% com
-        # "branco puro") - por isso ITERATIVO: mede de novo depois de
-        # preencher e completa o que ainda faltar, em vez de confiar na
-        # primeira medicao sozinha. Poucas iteracoes (a diferenca cai rapido
-        # a cada rodada); limite de seguranca pra nunca rodar pra sempre.
-        filler_mm = 0.0
-        for _ in range(3):
-            gap_mm = measure_trailing_gap_mm(pdf_path)
-            if gap_mm <= 5:
-                break
-            filler_mm += gap_mm
-            filler_html = full_html.replace(
-                "</body>",
-                f'<div style="height:{filler_mm:.1f}mm;background:{THEME["bg"]}"></div></body>',
-            )
-            with open(html_path, "w", encoding="utf-8") as f:
-                f.write(filler_html)
-            render_pdf(html_path, pdf_path)
+        render_pdf(html_path, pdf_path, tmpdir)
     print("OK:", pdf_path)
 
 
-# Caminho de instalacao padrao do winget (wkhtmltopdf.wkhtmltox) - usado
-# como fallback quando o binario nao esta no PATH da sessao atual (comum
-# logo apos instalar via winget, antes de abrir um terminal novo).
-_WKHTMLTOPDF_FALLBACK_PATH = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
+_BROWSER_PATHS = [
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+]
 
 
-def find_wkhtmltopdf():
-    found = shutil.which("wkhtmltopdf")
-    if found:
-        return found
-    if os.path.exists(_WKHTMLTOPDF_FALLBACK_PATH):
-        return _WKHTMLTOPDF_FALLBACK_PATH
-    return None
+def find_browser():
+    found = shutil.which("msedge") or shutil.which("chrome")
+    return found or next((p for p in _BROWSER_PATHS if os.path.exists(p)), None)
 
 
-def find_poppler_tool(name):
-    """pdfinfo/pdftoppm (poppler) - opcional, so' usado pra medir o vao branco
-    real da ultima pagina (ver measure_trailing_gap_mm). Path do winget tem
-    numero de versao (muda a cada update do poppler), por isso glob em vez de
-    caminho fixo como o _WKHTMLTOPDF_FALLBACK_PATH acima."""
-    exe = name + ".exe"
-    found = shutil.which(exe)
-    if found:
-        return found
-    pattern = os.path.join(
-        os.environ.get("LOCALAPPDATA", ""),
-        "Microsoft", "WinGet", "Packages", "oschwartz10612.Poppler_*",
-        "poppler-*", "Library", "bin", exe,
-    )
-    matches = glob.glob(pattern)
-    return matches[0] if matches else None
-
-
-def measure_trailing_gap_mm(pdf_path, dpi=100):
-    """Renderiza SO' a ultima pagina do PDF (poppler) e mede, em pixel, quanto
-    fundo sobra abaixo do ultimo pixel de conteudo real (nao-fundo) - unico
-    jeito confiavel de saber o tamanho exato do preenchimento sem estourar
-    pra uma pagina nova (calculo teorico via altura total/altura de pagina
-    testado e descartado - a propria logica de manter subtitulo+bloco juntos
-    ja cria vaos no MEIO do documento, entao "altura total" nao tem relacao
-    simples com o que sobra de verdade na ultima pagina). Sem poppler/Pillow
-    instalado, degrada bem: retorna 0 (sem preenchimento, comportamento de
-    antes)."""
-    pdfinfo, pdftoppm = find_poppler_tool("pdfinfo"), find_poppler_tool("pdftoppm")
-    if not pdfinfo or not pdftoppm:
-        return 0
-    try:
-        from PIL import Image
-    except ImportError:
-        return 0
-
-    info = subprocess.run([pdfinfo, pdf_path], capture_output=True, text=True).stdout
-    m = re.search(r'Pages:\s+(\d+)', info)
-    if not m:
-        return 0
-    last_page = int(m.group(1))
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        prefix = os.path.join(tmpdir, "last")
-        subprocess.run(
-            [pdftoppm, "-png", "-r", str(dpi), "-f", str(last_page), "-l", str(last_page), pdf_path, prefix],
-            capture_output=True, text=True,
-        )
-        pngs = glob.glob(prefix + "*.png")
-        if not pngs:
-            return 0
-
-        img = Image.open(pngs[0]).convert("RGB")
-        width, height = img.size
-        pixels = img.load()
-        # o vao em branco e' justamente BRANCO - nao bate com o fundo escuro
-        # de jeito nenhum, entao "linha que nao e' o fundo" tambem da match
-        # na primeira linha (bug real, gap sempre saia 0). O que queremos e'
-        # achar onde o branco COMECA, varrendo de baixo pra cima.
-        white = (255, 255, 255)
-        tolerance = 3
-
-        content_end = height
-        for y in range(height - 1, -1, -1):
-            row_is_white = all(
-                all(abs(pixels[x, y][c] - white[c]) <= tolerance for c in range(3))
-                for x in range(0, width, 4)
-            )
-            if not row_is_white:
-                content_end = y + 1
-                break
-
-        gap_px = height - content_end
-        gap_mm = gap_px / dpi * 25.4
-        return max(0, gap_mm - 3)  # margem de seguranca, nao estourar pra pagina nova
-
-
-def render_pdf(html_path, pdf_path):
-    wkhtml = find_wkhtmltopdf()
-    if not wkhtml:
-        raise RuntimeError(
-            "wkhtmltopdf nao encontrado. Instalar: "
-            "winget install --id wkhtmltopdf.wkhtmltox "
-            "(depois abrir um terminal novo pra pegar o PATH atualizado)."
-        )
-
-    # Margem nativa 0 - o fundo escuro do body+.page-bg cobre a pagina inteira
-    # ate a borda; a margem visual e' o padding do body em css(). Testado
-    # reservar margem nativa de verdade + --footer-html pra fixar um rodape
-    # sempre escuro (2026-09-11) - piorou: reduz o espaco util de conteudo em
-    # TODA pagina, o que faz o mecanismo de manter subtitulo+bloco juntos
-    # empurrar secoes inteiras mais cedo, criando vaos em branco NO MEIO de
-    # varias paginas (nao so' na ultima). Revertido - o unico vao residual
-    # aceito fica isolado na ultima pagina (ver comentario em
-    # wrap_heading_with_next_block).
+def render_pdf(html_path, pdf_path, tmpdir):
+    browser = find_browser()
+    if not browser:
+        raise RuntimeError("Edge/Chrome nao encontrado (procurado em: " + ", ".join(_BROWSER_PATHS) + ").")
+    pdf_path = os.path.abspath(pdf_path)
+    if os.path.exists(pdf_path):
+        os.remove(pdf_path)
+    # --user-data-dir proprio: sem ele o Edge headless se anexa a sessao do
+    # navegador que o usuario ja tem aberta.
     result = subprocess.run(
-        [wkhtml, "--enable-local-file-access", "--background",
-         "--margin-top", "0", "--margin-bottom", "0",
-         "--margin-left", "0", "--margin-right", "0",
-         "-q", html_path, pdf_path],
-        capture_output=True, text=True,
+        [browser, "--headless=new", "--disable-gpu", "--no-first-run", "--no-pdf-header-footer",
+         "--user-data-dir=" + os.path.join(tmpdir, "profile"),
+         "--print-to-pdf=" + pdf_path, Path(html_path).as_uri()],
+        capture_output=True, text=True, timeout=180,
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"wkhtmltopdf falhou: {result.stderr}")
-    print("(motor: wkhtmltopdf)")
+    if not os.path.exists(pdf_path):
+        raise RuntimeError(f"Edge headless falhou ({result.returncode}): {result.stderr[-500:]}")
+    print("(motor: Edge headless)")
 
 
 def default_output_path(md_path):

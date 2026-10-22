@@ -65,7 +65,7 @@ Write-Host "backfill-github-prs: $($allPrs.Count) PR(s) encontrada(s) no total (
 # nenhuma delas "adivinha" um numero de task, so' organiza pelo que ja esta
 # escrito no titulo:
 #
-# 1. Convencao de commitlint do GBM - "tipo(NNNNN): assunto" (ou
+# 1. Convencao de commitlint com id de task no escopo - "tipo(NNNNN): assunto" (ou
 #    "tipo(NNNNN-slug): assunto") - vira task numerica de verdade.
 # 2. Conventional commit generico com escopo nao-numerico - "tipo(scope):
 #    assunto" (ex.: "fix(wagons): ...", quando o time nao usa numero de
@@ -117,7 +117,7 @@ Write-Host "backfill-github-prs: $($taskGroups.Count) grupo(s) por numero de tas
 # backend por padrao, mesmo lugar onde resumo de migration ja vive hoje.
 function Get-RepoLayer([string]$repo) {
     if ($repo -match '-backend$') { return 'backend' }
-    if ($repo -match '^(gbm-)?(mfe|mobile)-') { return 'frontend' }
+    if ($repo -match '^([^-]+-)?(mfe|mobile)-') { return 'frontend' }
     return 'backend'
 }
 
@@ -162,8 +162,8 @@ function Test-ResumoExistsCluster([string]$cluster, [string]$repo) {
 # task/cluster+repo, mas a MAIORIA das PRs desta Biblioteca ja tem task
 # numerica de verdade documentada manualmente (task-code/planning/testes/
 # resumo/handover) sob um titulo/numero DIFERENTE do scope literal do
-# commit (ex.: PR com commit "fix(gbma-107064): ..." ja documentada sob a
-# task 107064 "de verdade", nao sob o cluster "gbma-107064" cru) - o
+# commit (ex.: PR com commit "fix(proj-107064): ..." ja documentada sob a
+# task 107064 "de verdade", nao sob o cluster "proj-107064" cru) - o
 # classificador por scope/titulo nunca reconhece isso como "ja existe"
 # porque a chave de agrupamento e' outra. Bug real, 2026-09-01: rodada
 # sem essa trava criou 47 "resumo" novos, 44 dos quais eram PRs que ja
@@ -210,7 +210,7 @@ function Write-BackfillResumo([PSCustomObject]$group) {
     $slugSource = if ($group.Cluster) { $group.Cluster } else { $latestSubject }
     $slug = Get-Slug $slugSource
     # Cluster (scope/titulo fallback) e' frequentemente o MESMO texto em
-    # repos diferentes (ex.: scope de commit "gbma-107064" copiado igual
+    # repos diferentes (ex.: scope de commit "proj-107064" copiado igual
     # numa mudanca espelhada em varios repos) - sem o repo no slug, 2 grupos
     # cluster+repo diferentes colidiam no mesmo arquivo `general-{slug}.md`
     # e um sobrescrevia o outro silenciosamente (bug real, 2026-09-01: 47

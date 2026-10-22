@@ -5,7 +5,7 @@ status: in_progress
 repo: nome-do-seu-repo
 task: TASK_ID
 function: Resumo executivo da task - uma linha
-titulo_busca: CRUD maritimo backend — folders/berths/scales  # obrigatorio - palavras-chave da tarefa, curto (bater o olho e entender)
+titulo_busca: CRUD de pedidos backend — listagem/filtros/export  # obrigatorio - palavras-chave da tarefa, curto (bater o olho e entender)
 stub: —
 related:
   - reqs/TASK_ID-slug.md
@@ -17,7 +17,7 @@ author: —
 
 Fonte de dados para o dashboard (task-hub) - nao precisa de prosa polida,
 bullets factuais bastam. Mantido pelas skills task-hub-resume/
-task-hub-complete, nao editado a mao.
+task-hub-qa e controle-documentacao, nao editado a mao.
 
 ## Status atual
 

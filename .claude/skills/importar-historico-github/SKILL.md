@@ -62,7 +62,7 @@ rodar `sync-all.ps1`, nao ha comando dedicado ainda).
 ## Como rodar
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/backfill-github-prs.ps1 -Org gbmtech
+powershell -ExecutionPolicy Bypass -File scripts/backfill-github-prs.ps1 -Org minha-org
 ```
 
 Reportar ao usuario, ao final (o proprio script ja imprime isso): quantos

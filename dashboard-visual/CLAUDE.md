@@ -10,8 +10,7 @@ nos favoritos do navegador — abrir por lá, sem precisar passar por
 ## Arquitetura interna — onde editar (leia antes de mexer no HTML/CSS)
 
 `build-dashboard.ps1` gera 7 páginas HTML (`dashboard.html`, `summaries/*.html`,
-`paleta.html`, `archive.html`, `nova-task.html`, `pendencias.html` + o
-redirect legado) — cada função `Build-*Html` monta uma delas. Isso já causou
+`paleta.html`, `archive.html`, `nova-task.html`, `pendencias.html`, `time.html`) — cada função `Build-*Html` monta uma delas. Isso já causou
 2 bugs reais de duplicação (2026-09-10-11: `titulo_busca` sumiu do card de QA
 porque cada tipo de card tinha seu próprio HTML escrito na mão; o CSS de cor
 existia em 7 cópias). Pra não repetir isso:
@@ -35,6 +34,11 @@ existia em 7 cópias). Pra não repetir isso:
   nem `$faviconLink` dentro de um comentário nessas duas heredocs
   (aconteceu, duplicou o bloco de CSS dentro de um comentário) — descrever
   por extenso em vez disso.
+- **CSS de card** (grade, `.card`, chips, pills de PR, `.position`, rodapé,
+  `.copy-btn`): mora na variável `$cardCss` (logo abaixo de `$sharedCss`),
+  usada pelo `dashboard.html` (placeholder `__CARD_CSS__` no `$head`) e pelo
+  `time.html`. Mesmo cuidado do `$sharedCss`: nunca escrever o placeholder
+  literal num comentário do `$head`.
 - CSS/JS que só uma página usa (ex.: formulário de `nova-task.html`, tabela
   de `pendencias.html`) fica dentro da função daquela página mesmo — não
   precisa sair de lá.
@@ -97,11 +101,6 @@ existia em 7 cópias). Pra não repetir isso:
   Nome técnico da skill ficou `task-hub-resume` mesmo após a mudança de
   pasta — o path por baixo (`cd "...\dashboard-visual"`) é sempre resolvido
   dinamicamente, nunca hardcoded.
-- `.claude/skills/task-hub-complete/` — resolve o comando "concluir task
-  X no repo Y" e delega pro gate de fechamento que já existe em
-  `controle-documentacao` (last check REQ+parent, cobertura backend+
-  frontend, `status: completed`, `sync-all.ps1`) — não reimplementa
-  checklist próprio e não marca concluído se algo do gate falhar.
 - **Ícone de livro no canto superior direito do card** (ao lado da
   estrela de favorito, nas Ativas; sozinho, no lugar da estrela, nas
   Completas) abre o resumo (`summaries/{arquivo}.html`, nova aba) quando
@@ -124,8 +123,8 @@ existia em 7 cópias). Pra não repetir isso:
   `scripts/build-dashboard.ps1` junto com o dashboard — o doc `resumo` em
   si **não é editado à mão**, é mantido automaticamente pelas skills
   (`task-hub-resume` garante que existe e mantém "Status atual"/"O que
-  falta" frescos; `task-hub-complete` finaliza "O que foi implementado"/
-  "REQs seguidas"; `task-hub-qa` toca "Status atual" ao reativar uma task
+  falta" frescos; o gate de fechamento de `controle-documentacao` finaliza
+  "O que foi implementado"/"REQs seguidas"; `task-hub-qa` toca "Status atual" ao reativar uma task
   pra ajustes de QA; `controle-documentacao` também dá um toque nele em
   qualquer atualização de doc da task, não só nesses momentos).
 - `.claude/skills/task-hub-qa/` — resolve o comando "ajustar qa task X no
@@ -143,33 +142,21 @@ existia em 7 cópias). Pra não repetir isso:
   `git` (nunca inventado por quem lê). Aparece no `head-row` da página de
   resumo, ao lado do repo — só lá, não no card compacto do dashboard
   (decisão explícita: manter o card enxuto).
-- **Lançamento automático via protocolo `biblioteca-cmd:`** — cada botão
-  de ação (`Retomar task`, `Reabrir p/ QA`, e os novos "Nova Task"/"Abrir
-  Claude") é um `<a href="biblioteca-cmd:<comando url-encoded>">` além de
-  copiar pro clipboard (comportamento antigo, mantido como fallback). Um
-  dois protocolos customizados registrados uma vez por máquina via
+- **Lançamento automático via protocolo `biblioteca-cmd-run:`** — cada
+  botão de ação (`Retomar task`, `Reabrir p/ QA`, "Nova Task", "Abrir
+  Claude" e os botões da página Time) é um
+  `<a href="biblioteca-cmd-run:<comando url-encoded>">` além de copiar pro
+  clipboard (fallback). O protocolo é registrado uma vez por máquina via
   `scripts/register-protocol.ps1` (edição de registro em `HKCU`, nunca
-  automática — o usuário roda esse script manualmente quando quiser
-  habilitar), ambos entregues pro mesmo `scripts/launch-command.vbs`:
-  `biblioteca-cmd:` abre um `cmd` novo e **digita o comando sem apertar
-  Enter** (usuário revisa e confirma manualmente).
-  `biblioteca-cmd-run:` digita **e aperta Enter sozinho** — usado por
-  **todos** os botões que abrem o Claude (`Retomar task`, `Reabrir p/ QA`,
-  "+ Nova Task" e o botão "Abrir Claude" do header): a confirmação embutida
-  no próprio fluxo de cada um (a skill `task-hub-resume`/`task-hub-qa` relê
-  os docs antes de agir; o prompt do Nova Task pede confirmação objetiva do
-  work item antes de gravar qualquer coisa) tornou a trava extra de
-  "revisar no terminal antes de apertar Enter" fricção redundante mesmo pro
-  `Reabrir p/ QA` — decisão do usuário, 2026-08-24 (revoga a decisão
-  parcial de 2026-08-21, que ainda mantinha esse botão manual por ser mais
-  sensível). "Abrir Claude" nunca teve skill nem grava nada, sempre foi
-  auto-Enter. **`biblioteca-cmd:` (sem `-run`) ficou sem nenhum uso** nos
-  botões do dashboard depois dessa mudança — a função `Get-LaunchUri` e o
-  registro do protocolo em `register-protocol.ps1` continuam existindo
-  (infra genérica, não vale remover só por estar sem chamador agora), mas
-  nenhum botão passa `-AutoRun:$false` hoje. Sem o protocolo `-run`
-  registrado, o link simplesmente não faz nada além do clipboard de
-  sempre — degrada bem.
+  automática — o usuário roda esse script quando quiser habilitar) e
+  entregue pro `scripts/launch-command.vbs`, que abre um `cmd` novo,
+  **digita o comando e aperta Enter**. A confirmação fica dentro do fluxo
+  de cada botão (a skill `task-hub-resume`/`task-hub-qa` relê os docs
+  antes de agir; o prompt do Nova Task pede confirmação objetiva do work
+  item antes de gravar qualquer coisa). O antigo `biblioteca-cmd:` (sem
+  Enter) ficou sem nenhum botão usando e foi removido — rodar
+  `register-protocol.ps1` de novo apaga o registro dele. Sem o protocolo
+  registrado, o link não faz nada além do clipboard — degrada bem.
 - `nova-task.html` — botão **+ Nova Task** do
   header abre essa página numa aba nova (não pergunta nada por chat de
   saída): formulário com link do Azure, link do parent (opcional), repo
@@ -183,9 +170,8 @@ existia em 7 cópias). Pra não repetir isso:
   dump completo (Azure/parent/repo/descrição) + instruções embutidas no
   próprio texto: buscar REQ/parent via MCP `azure-devops` (se conectado) e
   confirmar antes de gravar qualquer doc, mover-se pra pasta certa se essa
-  não for o repo esperado, seguir o fluxo global já existente
-  (`gbm-triagem` → `criar-task-code` → `plano-acao`, do `CLAUDE.md` do
-  usuário — dispara sozinho, sem gatilho especial daqui), e por fim anexar
+  não for o repo esperado, seguir o fluxo de skills do `CLAUDE.md` do
+  usuário (seja qual for — dispara sozinho, sem gatilho especial daqui), e por fim anexar
   uma entrada em `historico-nova-task.md`. **Não existe skill dedicada**
   pra esse fluxo (havia uma, `task-hub-new`, retirada) — o prompt é
   autossuficiente porque abre no repo certo e usa o mesmo gate global que
@@ -207,7 +193,7 @@ existia em 7 cópias). Pra não repetir isso:
   o comando a partir do texto atual do prompt, copia e lança direto via
   `biblioteca-cmd-run:` (auto-Enter, ver acima).
 - **MCP `azure-devops` — SÓ LEITURA, 3 camadas de trava.** Servidor
-  oficial da Microsoft (`@azure-devops/mcp`, org Trizy), registrado em
+  oficial da Microsoft (`@azure-devops/mcp`), registrado em
   **escopo user** (`claude mcp add --scope user`, em `~/.claude.json` —
   disponível em qualquer repo/sessão, não só na Biblioteca; precisa ser
   assim porque "Nova Task" agora abre direto no repo, não mais aqui).
@@ -267,12 +253,49 @@ existia em 7 cópias). Pra não repetir isso:
 - **Ordenação do `<datalist>` de repos** (usado em `nova-task.html` e no
   "Abrir Claude") — não é alfabética pura: `Get-RepoSortKey` em
   `build-dashboard.ps1` agrupa backend + mfe/mobile do mesmo domínio juntos
-  (ex.: `gbm-app-settings-backend` do lado de `gbm-mfe-settings`), joga
-  domínios sem par (migrations, geral) depois dos pares, e repos de
-  skills pessoais (`gbm-ai-skills`, `jow-ai-skills`, `ponytail` — lista
-  fixa, não é heurística) sempre por último. Também filtra fora qualquer
+  (ex.: `acme-app-settings-backend` do lado de `acme-mfe-settings` —
+  prefixo de org opcional), domínios em ordem alfabética, joga repos sem
+  esse padrão (migrations, geral) depois dos pares, e os repos listados em
+  `reposAoFim` no `biblioteca.config.json` (ex.: repos de skills,
+  não-projeto) sempre por último. `repoAliases` no mesmo config junta
+  domínios com nome diferente entre back e front (ex.:
+  `{"schedule": "scheduling"}`). Também filtra fora qualquer
   entrada que não pareça nome de pasta de verdade (vírgula/espaço — sinal
   de campo `repo:` de algum doc com 2 valores colados por engano).
+
+- `time.html` — página **Time** (link "Time (N)" no header, N = delegadas
+  ativas): tasks passadas pra outros devs, uma coluna por dev
+  (`delegadas/devs.json`, na ordem do arquivo; cada dev ganha uma cor —
+  avatar, faixa da coluna, borda dos cards — pela posição numa paleta fixa,
+  ou pelo campo opcional `cor` (hex) no JSON) + coluna "Sem dev" quando há
+  delegada analisada sem dono + coluna extra pra qualquer `dev:` que não está
+  mais no JSON (delegada nunca some por dev removido). Gerada por
+  `Build-TimeHtml`, só se a pasta `delegadas/` existir (opt-in: clone
+  novo não ganha página nem link até alguém criar a pasta — a skill
+  `delegar-task` cria na primeira delegação, ou crie à mão pra começar
+  pelo botão "+ Analisar tasks"). Docs `type: delegada` ficam em `$all`
+  (o sweep/backfill de PR precisa deles — é o sweep que fecha a delegada
+  quando o PR do dev mergeia), mas são filtrados de `$ownDocs`, que alimenta
+  a grade principal e a lista de repos. Card reaproveita
+  `Get-CardHeadHtml`/`Get-CardSubtitlesHtml`/`Get-CardFootHtml` e o
+  `$cardCss`; o que é só dele: chip de **etapa** derivado (Aguardando dev →
+  Em desenvolvimento → PR aberto/aguardando review → Ajustes solicitados |
+  Aprovado → Concluída; lê o veredito do último `### Rodada` em `## Review`),
+  chip de dificuldade/estimativa (frontmatter) e, expandido, Tela/Causa
+  provável/Atenção (linhas da tabela `## Análise`, casadas por prefixo ASCII
+  — rótulos fixos definidos pela skill `delegar-task`) + último review.
+  Botões do header: **+ Analisar tasks** e **Revisar PRs** (diálogo com
+  textarea de links → abre o Claude em `reposBasePath` com prompt que
+  chama a skill de delegação no modo certo — `delegar-task`, ou outro nome
+  via `delegarSkill` no `biblioteca.config.json` —, `biblioteca-cmd-run:`),
+  **Buscar PRs** (roda `scripts/delegadas-prs.ps1` direto, sem Claude:
+  `gh search prs <taskId> --author <login> --owner <githubOrg>` por
+  delegada ativa, URL nova vira `pr_pending` e o sync classifica) e
+  **+ Dev** (roda `scripts/time-dev.ps1` direto — nome vai em base64 porque
+  o `launch-command.vbs` decodifica a URL byte a byte e quebraria acento;
+  remover recusa se o dev ainda tem task ativa). Card com PR aberto ganha
+  botão **Revisar PR** já com os links. Auto-reload de 20s igual ao
+  dashboard, pulado enquanto um diálogo estiver aberto.
 
 ## Protocolo de seleção
 
@@ -284,7 +307,7 @@ digitado **e já executado** (protocolo `biblioteca-cmd-run:`, se
 registrado) ou o texto já está no clipboard pra colar (fallback, sem
 protocolo registrado). Cada comando abre `claude "<frase>"` reconhecida
 por uma skill específica
-(`retomar`/`concluir`/`ajustar qa` + task + repo) — vai direto ao fluxo
+(`retomar`/`ajustar qa` + task + repo) — vai direto ao fluxo
 certo, sem menu. A estrela de favorito não copia nada — o efeito já
 acontece na própria página (ver acima).
 
@@ -298,18 +321,7 @@ nesse repo (ver acima).
 **Alternativa (sem passar pelo dashboard):** a listagem de texto aparece
 no início da sessão; digitar o número direto funciona, ou mandar algo
 genérico ("menu") abre um `AskUserQuestion` (seta/Enter, paginado de 4 em
-4) — só pra retomada, "concluir"/"ajustar qa" sempre precisam da frase
-explícita.
-
-## Sobre o claude-mem
-
-Investigado como fonte pra "Posição atual": hoje não tem nada útil — só
-registrou observações desta conversa, nenhuma memória
-foi construída ainda dentro dos projetos reais. A tool `search` do
-claude-mem aceita um parâmetro `project`, então no futuro (se memória
-acumular lá) dá pra consultar sem mudar nada aqui. Por enquanto o "Posição
-atual" vem só de grep sobre o corpo dos docs da Biblioteca (PRs e
-pendências) — sem IA, sem rede.
+4) — só pra retomada, "ajustar qa" sempre precisa da frase explícita.
 
 ## O que esta pasta não é
 
